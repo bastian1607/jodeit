@@ -20,5 +20,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-The Jodeit name, logos and other branding assets are not licensed under this
-software license and remain the property of their respective rights holder.
+This license applies only to the Jodeit-authored software in this repository.
+
+Third-party software remains subject to its own license and usage terms.
+See THIRD_PARTY_NOTICES.md.
+
+The Jodeit name, logos, trademarks and other branding assets are not licensed
+under this software license and remain the property of their respective
+rights holder(s).
