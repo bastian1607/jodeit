@@ -1,5 +1,5 @@
 name: "Jodeit HEMS"
-version: "0.316.0"
+version: "0.316.0.1"
 slug: "jodeit_evcc"
 description: "evcc für Jodeit HEMS – offizielles evcc mit festem Jodeit-Branding"
 url: "https://www.jodeit-systeme.de/"
