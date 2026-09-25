@@ -1,9 +1,8 @@
-# Changelog
-
-## 0.316.0
-
-- Erster GitHub-fähiger Jodeit-HEMS-Prototyp.
-- Basis: offizielles `evcc/evcc:0.316.0` Image.
-- Jodeit-Branding über offizielle EVCC-White-Label-Umgebungsvariablen.
-- Persistente EVCC-Datenbank unter `/data/evcc.db`.
-- Persistente YAML-Konfiguration unter `/config/evcc.yaml`.
+Changelog
+0.316.0.1
+Fix container startup with the upstream `evcc/evcc` image.
+Clear the upstream Docker ENTRYPOINT before starting the Jodeit wrapper.
+EVCC core remains pinned to 0.316.0.
+No EVCC source code changes.
+0.316.0
+Initial Jodeit HEMS proof of concept.
