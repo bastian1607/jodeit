@@ -1,0 +1,53 @@
+name: "Jodeit HEMS"
+version: "0.316.0"
+slug: "jodeit_evcc"
+description: "evcc für Jodeit HEMS – offizielles evcc mit festem Jodeit-Branding"
+url: "https://www.jodeit-systeme.de/"
+arch:
+  - amd64
+  - aarch64
+init: false
+host_network: true
+ingress: true
+ingress_port: 7070
+homeassistant_api: true
+uart: true
+
+map:
+  - type: addon_config
+    read_only: false
+    path: /config
+  - type: homeassistant_config
+    read_only: false
+    path: /homeassistant
+
+ports:
+  "4712/tcp": 4712
+  "5200/tcp": 5200
+  "5201/tcp": 5201
+  "5353/udp": 5353
+  "7050/tcp": 7050
+  "7090/udp": 7090
+  "8887/tcp": 8887
+  "8899/udp": 8899
+  "9522/udp": 9522
+
+ports_description:
+  "4712/tcp": "EEBUS"
+  "5200/tcp": "Modbus Proxy"
+  "5201/tcp": "Modbus Proxy (multi port)"
+  "5353/udp": "Multicast DNS (mDNS)"
+  "7050/tcp": "evopt API"
+  "7090/udp": "Keba"
+  "8887/tcp": "OCPP web socket"
+  "8899/udp": "Modbus UDP"
+  "9522/udp": "SMA Speedwire Multicast"
+
+environment:
+  EVCC_DATABASE_DSN: "/data/evcc.db"
+  EVCC_CUSTOM_BRAND: "Jodeit HEMS"
+  EVCC_CUSTOM_LOGO_LIGHT: "/etc/jodeit/jodeit-logo.png"
+  EVCC_CUSTOM_LOGO_DARK: "/etc/jodeit/jodeit-logo.png"
+  EVCC_CUSTOM_WEBSITE: "https://www.jodeit-systeme.de/"
+  EVCC_CUSTOM_EMAIL: "info@jodeit-systeme.de"
+  EVCC_CUSTOM_PHONE: "+49 4435 3868379"
