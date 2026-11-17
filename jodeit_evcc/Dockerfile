@@ -1,4 +1,4 @@
-FROM evcc/evcc:0.318.2
+FROM evcc/evcc:0.319.1
 
 ARG BUILD_VERSION
 ARG BUILD_ARCH
