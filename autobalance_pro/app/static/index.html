@@ -20,6 +20,7 @@ input:focus,select:focus,.entity-search:focus{outline:2px solid #555;outline-off
 .entity-option input{width:auto;margin:3px 0}
 .entity-option small{display:block;font-size:11px;color:#68737b;overflow-wrap:anywhere}
 .entity-counter{display:inline-block;background:#e9ecea;color:#303436;padding:2px 7px;border-radius:12px;font-size:11px}
+.entity-single input[type=search]{margin-bottom:6px;background:#fafafa}
 </style></head><body><header><div><h1>Jodeit AutoBalance Pro</h1><small>v0.1.0 · Installationspilot</small></div><span class="tag">Nur Messung · keine Steuerbefehle</span></header><main><div id="notice" class="alert">Räume und Entitäten konfigurieren. Diese App greift nicht in die Heizung ein.</div><div class="tabs" id="tabs"><button class="active" data-tab="dashboard">Übersicht</button><button data-tab="rooms">1 Räume</button><button data-tab="zones">2 Thermische Zonen</button><button data-tab="heating">3 Wärmepumpe</button><button data-tab="samples">4 Messwerte</button></div>
 <section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div class="grid" id="stats"></div><p>Beginne mit den Räumen. Jeder Raum ist zuerst eine eigene geschlossene thermische Zone. Offene Bereiche kannst du anschließend verbinden.</p><button class="primary" onclick="tab('rooms')">Räume einrichten</button></section>
 <section id="rooms" class="tab hidden"><div class="panel"><div class="row"><h2>Räume</h2><button class="primary" onclick="editRoom()">+ Raum anlegen</button></div><div id="room-list"></div></div><div id="room-editor" class="panel hidden"><h2 id="room-heading">Raum</h2><form id="room-form"><div class="grid"><div><label>Raumname</label><input id="r-name" required maxlength="100"></div><div><label>Solltemperatur (°C)</label><input id="r-target" type="number" min="5" max="35" step="0.5" value="21" required></div><div><label>Heizlast (W), falls bekannt</label><input id="r-load" type="number" min="1" max="50000"></div><div><label>Fläche (m²), optional</label><input id="r-area" type="number" min="1" max="1000" step=".1"></div></div><h3>Temperatursensoren · mindestens 1</h3><div id="r-temperature"></div><h3>Fenster- und Türkontakte · optional</h3><div id="r-windows"></div><div class="row"><h3>Heizkörper</h3><button type="button" onclick="addRadiator()">+ Heizkörper</button></div><div id="r-radiators"></div><p class="hint">Stellmotor-Entitäten werden nur gespeichert und nie angesteuert.</p><button class="primary" type="submit">Raum speichern</button> <button type="button" onclick="cancelRoom()">Abbrechen</button></form></div></section>
@@ -35,7 +36,22 @@ async function save(){await api('config','POST',cfg);notice('Konfiguration gespe
 function tab(t){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('hidden',x.id!==t));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));if(t==='rooms')showRooms();if(t==='zones')showZones();if(t==='heating')showHeating();if(t==='samples')latest();if(t==='dashboard')stats()}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function classified(kind){return entities.filter(e=>kind==='temp'?(e.entity_id.startsWith('sensor.')&&(e.device_class==='temperature'||['°C','°F'].includes(e.unit))):kind==='window'?(e.entity_id.startsWith('binary_sensor.')&&['window','door','opening'].includes(e.device_class)):kind==='motor'?(e.entity_id.startsWith('number.')||e.entity_id.startsWith('climate.')):kind==='status'?(e.entity_id.startsWith('binary_sensor.')||e.entity_id.startsWith('sensor.')):e.entity_id.startsWith('sensor.'))}
-function options(kind,value='',blank=true){let items=classified(kind);if(value&&!items.find(e=>e.entity_id===value))items=[{entity_id:value,name:value+' (nicht verfügbar)',state:'unknown'},...items];return '<select>'+(blank?'<option value="">Keine Zuordnung</option>':'')+items.map(e=>'<option value="'+safe(e.entity_id)+'" '+(value===e.entity_id?'selected':'')+'>'+safe(e.name||e.entity_id)+' · '+safe(e.state)+'</option>').join('')+'</select>'}
+function options(kind,value='',blank=true){
+  let items=classified(kind);
+  if(value&&!items.find(e=>e.entity_id===value))items=[{entity_id:value,name:value+' (nicht verfügbar)',state:'unknown'},...items];
+  const list='<select aria-label="Entität auswählen">'+(blank?'<option value="">Keine Zuordnung</option>':'')+items.map(e=>'<option value="'+safe(e.entity_id)+'" '+(value===e.entity_id?'selected':'')+'>'+safe(e.name||e.entity_id)+' · '+safe(e.state)+'</option>').join('')+'</select>';
+  return '<div class="entity-single" data-kind="'+safe(kind)+'"><input type="search" aria-label="Entitäten durchsuchen" placeholder="Entität suchen (Name oder ID)…" oninput="filterSingle(this)">'+list+'</div>';
+}
+function filterSingle(input){
+  const root=input.closest('.entity-single'),select=root.querySelector('select'),chosen=select.value;
+  const query=input.value.trim().toLocaleLowerCase('de');
+  const matching=classified(root.dataset.kind).filter(e=>(String(e.name||'')+' '+e.entity_id).toLocaleLowerCase('de').includes(query));
+  if(chosen&&!matching.some(e=>e.entity_id===chosen))matching.unshift({entity_id:chosen,name:chosen+' (aktuell ausgewählt)',state:''});
+  select.replaceChildren();
+  const none=document.createElement('option');none.value='';none.textContent='Keine Zuordnung';select.append(none);
+  for(const e of matching){const opt=document.createElement('option');opt.value=e.entity_id;opt.textContent=(e.name||e.entity_id)+' · '+e.state;select.append(opt)}
+  select.value=chosen;
+}
 const entitySelections={};
 function checkItems(dest,kind,selected){
   entitySelections[dest]=new Set(selected);
