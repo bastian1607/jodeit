@@ -12,6 +12,53 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Stabilisierung im Entwicklungsbranch (noch kein Release)
+
+Dieser Änderungssatz ergänzt v0.1.1; Manifest und Versionsanzeige bleiben bis zu einem
+freigegebenen Release auf 0.1.1. UI, Health-Endpunkt und Übersicht verwenden dieselbe
+Laufzeitversion aus `app/version.py`; ein Test gleicht sie mit `config.yaml` ab.
+
+- Messqualität und Aktualität werden je Entität angezeigt. Temperaturwerte werden auf
+  endliche Zahlen, unterstützte Einheiten und einen breiten Plausibilitätsbereich geprüft;
+  Fahrenheit wird zusätzlich nach Celsius normalisiert. Rohwerte bleiben erhalten.
+- HA-Abfrageausfälle werden mit letztem Versuch und letztem Erfolg lokal gespeichert und
+  in einer eigenen Statusanzeige dargestellt. Eine erreichbare App bedeutet nicht, dass
+  die HA-Messung funktioniert. `/health` bleibt ein Prozess-/HTTP-Lebenszeichen.
+- Konfigurationsprüfung erfasst auch Heizkörper-/Wärmepumpen-Entitätsdomänen und
+  numerische Eingaben. Speichern benötigt keine HA-Verbindung; die Existenz und
+  Messqualität einer Entität werden erst beim lesenden Abruf geprüft. Das ist kein
+  Nachweis direkter Ventilpositionssteuerung.
+- Messwerte werden in der UI regelmäßig aktualisiert. Gelöschte Zuordnungen erscheinen
+  nicht mehr in der aktuellen Messwertliste; ihre Historie bleibt in SQLite erhalten.
+
+### Bedeutung der Qualitätsprüfung
+
+Aktualität nutzt den HA-Zeitstempel `last_reported`, ersatzweise `last_updated`,
+niemals `last_changed`: Ein gleichbleibender Temperaturwert ist nicht automatisch alt.
+Nach 30 Minuten ohne Meldung gilt ein Wert als veraltet; fehlende/ungültige Zeitstempel
+und Zeitstempel mehr als 60 Sekunden in der Zukunft gelten als ungültig.
+Dies ist eine vorläufige Diagnosegrenze, keine Aussage über den Funkkontakt zum Gerät:
+Integrationen melden unterschiedlich häufig, und HA kann Zustände wiederherstellen.
+Bei Rückgriff auf `last_updated` können lange unveränderte Werte und Fensterzustände
+vorsorglich als veraltet erscheinen; der Zeitstempel ist kein Funk-Lebenszeichen.
+Fensterkontakte werden zusätzlich auf `on`/`off` geprüft. Temperaturwerte müssen °C
+oder °F verwenden und normalisiert zwischen −60 und +150 °C liegen. Dieser breite
+Bereich ersetzt keine geräte- oder raumspezifische Plausibilitätsprüfung.
+
+### Datenbank, Backup und Rückkehr zur Vorversion
+
+Vor dem ersten Start dieses Branches die App stoppen und `/data/autobalance.db` sichern
+(bei laufender SQLite-Datenbank wäre eine konsistente SQLite-Backup-API statt einfacher
+Dateikopie nötig). Die Datenbank wird beim Start um die Messwertspalten `source_at`, `quality`,
+`normalized_value`, `normalized_unit` und die Tabelle `acquisition` additiv erweitert: vorhandene
+Konfiguration und Rohmesswerte bleiben erhalten. Alte Messwerte besitzen keinen
+nachträglichen Qualitätsnachweis und werden als ungeprüft behandelt.
+
+Die Vorversion liest ihre bisherigen Spalten weiterhin; für eine vollständige Rückkehr
+App stoppen, Vorversion installieren und die gesicherte Datenbank zurückspielen.
+Dabei gehen nach der Sicherung erhobene Messwerte verloren. Kein manuelles SQL und keine
+HA-Service-Aufrufe sind für die Aktualisierung vorgesehen.
+
 ## Änderungen in v0.1.1
 
 - Suchbare Dropdowns für sämtliche HA-Entitätsauswahlen (Anzeigename und Entity-ID), mit Mehrfachauswahl bei Temperatur- und Fensterkontakten.
@@ -30,7 +77,7 @@
 ## Grenzen
 
 - Der HA-App/Ingress-Integrationstest steht noch aus.
-- Noch keine Sensorqualitätsprüfung, Heizlastberechnung, hydraulische Empfehlung, 30-Tage-Analyse oder Heizkurvenoptimierung.
+- Sensorqualität wird im Entwicklungsbranch grundlegend geprüft; keine Gerätefähigkeitsprüfung, Heizlastberechnung, hydraulische Empfehlung, 30-Tage-Analyse oder Heizkurvenoptimierung.
 - Ventilantriebe werden **nicht angesteuert**.
 - Für Stellversuche müssen Mindestvolumenstrom, Herstellergrenzen, mechanische Kompatibilität und Ausfallverhalten geprüft sein.
 - Motorhub-Prozentwerte sind keine l/h-Werte.
@@ -39,8 +86,17 @@
 
 ```bash
 cd autobalance_pro
-python -m unittest discover -s tests
+python -m unittest discover -s tests -v
 ```
+
+Optionale Browserregression (Python-Paket `playwright` und Chromium erforderlich):
+```bash
+AUTO_BALANCE_UI_TESTS=1 python -m unittest discover -s tests -p test_ui.py -v
+```
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` kann den Browserpfad überschreiben.
+Tests verwenden ausschließlich temporäre Datenbanken und synthetische HA-Entitäten;
+Screenshots/Traces liegen standardmäßig unter `/tmp/autobalance-ui-artifacts`.
+Sie ersetzen keinen Test im echten Home Assistant oder unter dessen Ingress.
 
 Für lokalen HTTP-Test:
 ```bash
