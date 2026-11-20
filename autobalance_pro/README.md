@@ -14,7 +14,7 @@
 
 ## Änderungen in v0.1.1
 
-- Mehrfachauswahl für Raumtemperatur- und Fensterkontakte als suchbares Dropdown (Anzeigename und Entity-ID).
+- Suchbare Dropdowns für sämtliche HA-Entitätsauswahlen (Anzeigename und Entity-ID), mit Mehrfachauswahl bei Temperatur- und Fensterkontakten.
 - Dezente dunkle Header- und Button-Farbgebung als vorläufige Jodeit-nahe Gestaltung; exakte CI-Farben und Original-Logo sind noch nicht bestätigt.
 - Keine funktionale Veränderung der Heizungssteuerung: App bleibt read-only.
 
