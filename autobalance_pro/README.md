@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.1.1
+# Jodeit AutoBalance Pro v0.1.2
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -12,10 +12,10 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
-## Stabilisierung im Entwicklungsbranch (noch kein Release)
+## Änderungen in v0.1.2
 
-Dieser Änderungssatz ergänzt v0.1.1; Manifest und Versionsanzeige bleiben bis zu einem
-freigegebenen Release auf 0.1.1. UI, Health-Endpunkt und Übersicht verwenden dieselbe
+Dieser freigegebene Release ergänzt v0.1.1. Manifest und Laufzeitversion sind 0.1.2.
+UI, Health-Endpunkt und Übersicht verwenden dieselbe
 Laufzeitversion aus `app/version.py`; ein Test gleicht sie mit `config.yaml` ab.
 
 - Messqualität und Aktualität werden je Entität angezeigt. Temperaturwerte werden auf
@@ -77,7 +77,7 @@ HA-Service-Aufrufe sind für die Aktualisierung vorgesehen.
 ## Grenzen
 
 - Der HA-App/Ingress-Integrationstest steht noch aus.
-- Sensorqualität wird im Entwicklungsbranch grundlegend geprüft; keine Gerätefähigkeitsprüfung, Heizlastberechnung, hydraulische Empfehlung, 30-Tage-Analyse oder Heizkurvenoptimierung.
+- Sensorqualität wird in v0.1.2 grundlegend geprüft; keine Gerätefähigkeitsprüfung, Heizlastberechnung, hydraulische Empfehlung, 30-Tage-Analyse oder Heizkurvenoptimierung.
 - Ventilantriebe werden **nicht angesteuert**.
 - Für Stellversuche müssen Mindestvolumenstrom, Herstellergrenzen, mechanische Kompatibilität und Ausfallverhalten geprüft sein.
 - Motorhub-Prozentwerte sind keine l/h-Werte.

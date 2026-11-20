@@ -94,7 +94,7 @@ class BrowserTests(unittest.TestCase):
         self.config()
         server.sample()
         self.page.goto(self.url)
-        expect(self.page.locator('header small')).to_contain_text('v0.1.1')
+        expect(self.page.locator('header small')).to_contain_text('v' + server.VERSION)
         expect(self.page.locator('#acquisition-status')).to_contain_text('Home Assistant erreichbar')
         self.page.get_by_role('button', name='4 Messwerte').click()
         expect(self.page.locator('#sample-list')).to_contain_text('20 °C')
