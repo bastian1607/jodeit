@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.1.0
+# Jodeit AutoBalance Pro v0.1.1
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -11,6 +11,12 @@
 5. Räume, Sensoren, Fensterkontakte, Heizkörper und thermische Zonen einrichten. BBQKees/EMS-ESP-Messwerte sind auswählbar, sofern sie als HA-Entitäten vorhanden sind.
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
+
+## Änderungen in v0.1.1
+
+- Mehrfachauswahl für Raumtemperatur- und Fensterkontakte als suchbares Dropdown (Anzeigename und Entity-ID).
+- Dezente dunkle Header- und Button-Farbgebung als vorläufige Jodeit-nahe Gestaltung; exakte CI-Farben und Original-Logo sind noch nicht bestätigt.
+- Keine funktionale Veränderung der Heizungssteuerung: App bleibt read-only.
 
 ## Bereits im Quellcode
 
