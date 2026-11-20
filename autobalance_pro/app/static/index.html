@@ -21,7 +21,7 @@ input:focus,select:focus,.entity-search:focus{outline:2px solid #555;outline-off
 .entity-option small{display:block;font-size:11px;color:#68737b;overflow-wrap:anywhere}
 .entity-counter{display:inline-block;background:#e9ecea;color:#303436;padding:2px 7px;border-radius:12px;font-size:11px}
 .entity-single input[type=search]{margin-bottom:6px;background:#fafafa}
-</style></head><body><header><div><h1>Jodeit AutoBalance Pro</h1><small>v0.1.0 · Installationspilot</small></div><span class="tag">Nur Messung · keine Steuerbefehle</span></header><main><div id="notice" class="alert">Räume und Entitäten konfigurieren. Diese App greift nicht in die Heizung ein.</div><div class="tabs" id="tabs"><button class="active" data-tab="dashboard">Übersicht</button><button data-tab="rooms">1 Räume</button><button data-tab="zones">2 Thermische Zonen</button><button data-tab="heating">3 Wärmepumpe</button><button data-tab="samples">4 Messwerte</button></div>
+</style></head><body><header><div><h1>Jodeit AutoBalance Pro</h1><small>v__APP_VERSION__ · Installationspilot</small></div><span class="tag">Nur Messung · keine Steuerbefehle</span></header><main><div id="acquisition-status" class="alert" role="status" aria-live="polite" aria-atomic="true">Messstatus wird geladen …</div><div id="notice" class="alert" role="status" aria-live="polite">Räume und Entitäten konfigurieren. Diese App greift nicht in die Heizung ein.</div><div class="tabs" id="tabs"><button class="active" data-tab="dashboard">Übersicht</button><button data-tab="rooms">1 Räume</button><button data-tab="zones">2 Thermische Zonen</button><button data-tab="heating">3 Wärmepumpe</button><button data-tab="samples">4 Messwerte</button></div>
 <section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div class="grid" id="stats"></div><p>Beginne mit den Räumen. Jeder Raum ist zuerst eine eigene geschlossene thermische Zone. Offene Bereiche kannst du anschließend verbinden.</p><button class="primary" onclick="tab('rooms')">Räume einrichten</button></section>
 <section id="rooms" class="tab hidden"><div class="panel"><div class="row"><h2>Räume</h2><button class="primary" onclick="editRoom()">+ Raum anlegen</button></div><div id="room-list"></div></div><div id="room-editor" class="panel hidden"><h2 id="room-heading">Raum</h2><form id="room-form"><div class="grid"><div><label>Raumname</label><input id="r-name" required maxlength="100"></div><div><label>Solltemperatur (°C)</label><input id="r-target" type="number" min="5" max="35" step="0.5" value="21" required></div><div><label>Heizlast (W), falls bekannt</label><input id="r-load" type="number" min="1" max="50000"></div><div><label>Fläche (m²), optional</label><input id="r-area" type="number" min="1" max="1000" step=".1"></div></div><h3>Temperatursensoren · mindestens 1</h3><div id="r-temperature"></div><h3>Fenster- und Türkontakte · optional</h3><div id="r-windows"></div><div class="row"><h3>Heizkörper</h3><button type="button" onclick="addRadiator()">+ Heizkörper</button></div><div id="r-radiators"></div><p class="hint">Stellmotor-Entitäten werden nur gespeichert und nie angesteuert.</p><button class="primary" type="submit">Raum speichern</button> <button type="button" onclick="cancelRoom()">Abbrechen</button></form></div></section>
 <section id="zones" class="panel tab hidden"><h2>Thermische Zonen</h2><p>Unzugeordnete Räume bilden automatisch geschlossene Einzelzonen. Für offene Bereiche zwei oder mehr Räume zu einer Zone kombinieren.</p><div id="zone-list"></div><hr><h3>Neue gemeinsame Zone</h3><form id="zone-form"><label>Zonenname</label><input id="z-name" required placeholder="z. B. Wohnzimmer und Küche"><label>Räume auswählen</label><div id="z-rooms" class="checks"></div><p><button class="primary" type="submit">Zone erstellen</button></p></form></section>
@@ -32,7 +32,7 @@ let cfg={rooms:[],zones:[],heating:{}},entities=[],editing=null,rads=[];
 const el=id=>document.getElementById(id),safe=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 function notice(t,bad=false){el('notice').textContent=t;el('notice').className='alert '+(bad?'error':'ok')}
 async function api(path,method='GET',obj){let r=await fetch('api/'+path,{method,headers:{'Content-Type':'application/json'},body:obj?JSON.stringify(obj):undefined}),d=await r.json();if(!r.ok)throw Error(d.error||'HTTP '+r.status);return d}
-async function save(){await api('config','POST',cfg);notice('Konfiguration gespeichert.')}
+async function save(){await api('config','POST',cfg);notice('Konfiguration gespeichert.');await stats()}
 function tab(t){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('hidden',x.id!==t));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));if(t==='rooms')showRooms();if(t==='zones')showZones();if(t==='heating')showHeating();if(t==='samples')latest();if(t==='dashboard')stats()}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function classified(kind){return entities.filter(e=>kind==='temp'?(e.entity_id.startsWith('sensor.')&&(e.device_class==='temperature'||['°C','°F'].includes(e.unit))):kind==='window'?(e.entity_id.startsWith('binary_sensor.')&&['window','door','opening'].includes(e.device_class)):kind==='motor'?(e.entity_id.startsWith('number.')||e.entity_id.startsWith('climate.')):kind==='status'?(e.entity_id.startsWith('binary_sensor.')||e.entity_id.startsWith('sensor.')):e.entity_id.startsWith('sensor.'))}
@@ -85,7 +85,24 @@ function checkItems(dest,kind,selected){
   render();
 }
 function checked(dest){return entitySelections[dest]?[...entitySelections[dest]]:[...el(dest).querySelectorAll('input:checked')].map(x=>x.value)}
-function showRooms(){el('room-list').innerHTML=cfg.rooms.length?cfg.rooms.map(r=>'<div class="item row"><div><b>'+safe(r.name)+'</b> · '+safe(r.target)+' °C<div class="subtitle">'+r.temperature_sensors.length+' Temperaturfühler · '+r.window_sensors.length+' Fensterkontakte · '+r.radiators.length+' Heizkörper</div></div><div><button onclick="editRoom(\''+safe(r.id)+'\')">Bearbeiten</button> <button class="danger" onclick="deleteRoom(\''+safe(r.id)+'\')">Löschen</button></div></div>').join(''):'<p>Keine Räume angelegt.</p>'}
+function showRooms(){
+  const list=el('room-list');
+  list.replaceChildren();
+  if(!cfg.rooms.length){const empty=document.createElement('p');empty.textContent='Keine Räume angelegt.';list.append(empty);return}
+  for(const r of cfg.rooms){
+    const item=document.createElement('div');item.className='item row';
+    const details=document.createElement('div');
+    const name=document.createElement('b');name.textContent=r.name;
+    details.append(name,document.createTextNode(' · '+r.target+' °C'));
+    const subtitle=document.createElement('div');subtitle.className='subtitle';
+    subtitle.textContent=r.temperature_sensors.length+' Temperaturfühler · '+r.window_sensors.length+' Fensterkontakte · '+r.radiators.length+' Heizkörper';
+    details.append(subtitle);
+    const actions=document.createElement('div');
+    const edit=document.createElement('button');edit.textContent='Bearbeiten';edit.addEventListener('click',()=>editRoom(r.id));
+    const remove=document.createElement('button');remove.className='danger';remove.textContent='Löschen';remove.addEventListener('click',()=>deleteRoom(r.id));
+    actions.append(edit,document.createTextNode(' '),remove);item.append(details,actions);list.append(item);
+  }
+}
 function editRoom(id=null){editing=id;let r=id?cfg.rooms.find(x=>x.id===id):{name:'',target:21,heat_load:null,area:null,temperature_sensors:[],window_sensors:[],radiators:[]};rads=structuredClone(r.radiators);el('room-editor').classList.remove('hidden');el('room-heading').textContent=id?'Raum bearbeiten':'Raum anlegen';for(let k of ['name','target'])el('r-'+k).value=r[k];el('r-load').value=r.heat_load??'';el('r-area').value=r.area??'';checkItems('r-temperature','temp',r.temperature_sensors);checkItems('r-windows','window',r.window_sensors);drawRadiators()}
 function cancelRoom(){el('room-editor').classList.add('hidden');editing=null}
 function collectRads(){return [...el('r-radiators').querySelectorAll('.radiator')].map(n=>({name:n.querySelector('.rad-name').value.trim(),entity:n.querySelector('.rad-entity select').value,valve_model:n.querySelector('.rad-model').value.trim(),power_w:n.querySelector('.rad-power').value||null}))}
@@ -99,7 +116,63 @@ el('zone-form').onsubmit=async e=>{e.preventDefault();let ids=checked('z-rooms')
 async function delZone(i){let old=structuredClone(cfg);cfg.zones.splice(i,1);try{await save();showZones()}catch(ex){cfg=old;notice(ex.message,true)}}
 function showHeating(){for(let k of ['manufacturer','model','circuit_name'])el('h-'+k).value=cfg.heating[k]||'';for(let k of ['outdoor','flow','return','compressor','dhw'])el('h-'+k).innerHTML=options(['compressor','dhw'].includes(k)?'status':'temp',cfg.heating[k]||'')}
 el('heating-form').onsubmit=async e=>{e.preventDefault();let old=structuredClone(cfg);for(let k of ['manufacturer','model','circuit_name'])cfg.heating[k]=el('h-'+k).value.trim();for(let k of ['outdoor','flow','return','compressor','dhw'])cfg.heating[k]=el('h-'+k).querySelector('select').value;try{await save()}catch(ex){cfg=old;notice(ex.message,true)}};
-async function stats(){try{let m=await api('overview');el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',m.last_sample?new Date(m.last_sample).toLocaleString('de-DE'):'Keine']].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('')}catch(ex){notice(ex.message,true)}}
-async function latest(){try{let d=await api('latest');el('sample-list').innerHTML=d.observations.length?d.observations.map(x=>'<div class="item"><b>'+safe(x.entity_id)+'</b><div>'+safe(x.state)+' '+safe(x.unit)+' · '+safe(x.at)+' '+(x.valid?'':'· ungültig')+'</div></div>').join(''):'<p>Noch keine Messungen gespeichert.</p>'}catch(ex){notice(ex.message,true)}}
-async function boot(){try{cfg=await api('config');try{let d=await api('entities');entities=d.entities;notice(entities.length+' Home-Assistant-Entitäten geladen. Read-only.')}catch(ex){notice('HA-Entitäten derzeit nicht verfügbar: '+ex.message,true)}await stats()}catch(ex){notice(ex.message,true)}}boot();
+function dateText(value){
+  if(!value)return 'Noch nicht vorhanden';
+  const parsed=new Date(value);
+  return Number.isNaN(parsed.getTime())?'Zeitpunkt unbekannt':parsed.toLocaleString('de-DE');
+}
+function acquisitionStatus(a){
+  let text='Warte auf erste Messung.',kind='';
+  if(a.error==='not_configured')text='Messung pausiert: Noch keine Entitäten zugeordnet.';
+  else if(a.connected===false){text='Home Assistant nicht erreichbar. Gespeicherte Werte sind keine aktuelle Messung.';kind='error'}
+  else if(a.stale&&a.last_success){text='Messung veraltet: Seit mehr als 30 Minuten keine erfolgreiche Abfrage.';kind='error'}
+  else if(a.connected===true){text='Home Assistant erreichbar. Datenqualität je Messwert prüfen.';kind='ok'}
+  text+=' Letzter Versuch: '+dateText(a.last_attempt)+'. Letzte erfolgreiche Abfrage: '+dateText(a.last_success)+'.';
+  const root=el('acquisition-status');
+  if(root.textContent!==text)root.textContent=text;
+  root.className='alert '+kind;
+}
+function acquisitionUnavailable(){
+  const root=el('acquisition-status');
+  root.textContent='Messstatus nicht abrufbar. Sichtbare Werte können veraltet sein.';
+  root.className='alert error';
+}
+const qualityLabels={ok:'Gültig',unavailable:'Nicht verfügbar',unknown:'Zustand unbekannt',invalid_number:'Kein gültiger Zahlenwert',invalid_state:'Ungültiger Kontaktzustand',invalid_unit:'Ungeeignete Einheit',implausible:'Außerhalb des plausiblen Bereichs',missing_timestamp:'Aktualität unbekannt: Zeitstempel fehlt',future_timestamp:'Zeitstempel liegt in der Zukunft',stale:'Veraltet',unchecked:'Historischer Wert: Qualität ungeprüft'};
+function sampleHTML(x){
+  const quality=x.quality||'unchecked';
+  let label=qualityLabels[quality]||'Qualität unbekannt';
+  if(x.stale&&quality!=='stale')label+=' · Veraltet';
+  const valid=Boolean(x.valid)&&quality==='ok'&&!x.stale;
+  const value=x.normalized_value!==null&&x.normalized_value!==undefined
+    ?safe(Number(x.normalized_value).toLocaleString('de-DE',{maximumFractionDigits:2}))+' '+safe(x.normalized_unit)
+    :safe(x.state)+' '+safe(x.unit);
+  const raw=x.normalized_value!==null&&x.normalized_value!==undefined
+    ?'<div class="hint">Originalwert: '+safe(x.state)+' '+safe(x.unit)+'</div>':'';
+  return '<div class="item"><b>'+safe(x.entity_id)+'</b><div>'+value+'</div>'+raw+'<div class="tag '+(valid?'ok':'error')+'">'+safe(label)+'</div><div class="hint">Erfasst: '+safe(dateText(x.at))+' · HA-Meldung: '+safe(dateText(x.source_at))+'</div></div>';
+}
+async function stats(){
+  try{
+    const m=await api('overview');
+    acquisitionStatus(m.acquisition||{});
+    el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)]].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
+  }catch(ex){acquisitionUnavailable()}
+}
+async function latest(){
+  try{
+    const d=await api('latest');
+    if(d.acquisition)acquisitionStatus(d.acquisition);
+    el('sample-list').innerHTML=d.observations.length?d.observations.map(sampleHTML).join(''):'<p>Noch keine Messungen für die zugeordneten Entitäten gespeichert.</p>';
+  }catch(ex){
+    el('sample-list').textContent='Messwerte derzeit nicht abrufbar. Bitte erneut aktualisieren.';
+    acquisitionUnavailable();
+  }
+}
+async function boot(){try{cfg=await api('config');try{let d=await api('entities');entities=d.entities;notice(entities.length+' Home-Assistant-Entitäten geladen. Read-only.')}catch(ex){notice('HA-Entitäten derzeit nicht verfügbar: '+ex.message,true)}}catch(ex){notice(ex.message,true)}await stats()}boot();
+async function refreshMeasurements(){
+  if(document.hidden)return;
+  await stats();
+  if(!el('samples').classList.contains('hidden'))await latest();
+}
+setInterval(refreshMeasurements,30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshMeasurements()});
 </script></body></html>
