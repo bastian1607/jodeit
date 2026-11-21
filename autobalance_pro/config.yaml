@@ -1,7 +1,7 @@
 name: Jodeit AutoBalance Pro
-version: 0.1.2
+version: 0.2.0
 slug: autobalance_pro
-description: Read-only pilot for room and thermal zone measurement
+description: Read-only pilot for room, thermal zone and heating-system data
 arch:
   - aarch64
   - amd64
