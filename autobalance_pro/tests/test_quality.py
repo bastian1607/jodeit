@@ -120,6 +120,24 @@ class QualityTests(unittest.TestCase):
         raw[0]['last_updated']=self.now.isoformat()
         with patch.object(server,'TOKEN','test'),patch.object(server.urllib.request,'urlopen',return_value=Response()),patch.object(server.json,'load',return_value=raw):
             self.assertEqual(server.get_entities()[0]['source_at'],self.now.isoformat())
+    def test_ab011_event_based_entities_are_not_aged_out(self):
+        old=(self.now-timedelta(hours=7)).isoformat()
+        contact=self.entity(entity_id='binary_sensor.window',state='off',unit='',source_at=old)
+        self.assertEqual(server.quality(contact,False,self.now)[0],'ok')
+        self.assertEqual(server.quality(dict(contact,source_at=None),False,self.now)[0],'ok')
+        self.assertEqual(server.quality(dict(contact,state='unavailable'),False,self.now)[0],'unavailable')
+        self.assertEqual(server.quality(dict(contact,state='unknown'),False,self.now)[0],'unknown')
+        status=self.entity(entity_id='sensor.verdichter',state='aus',unit='',source_at=old)
+        self.assertEqual(server.quality(status,False,self.now)[0],'ok')
+        self.assertEqual(server.quality(self.entity(source_at=old),True,self.now)[0],'stale')   # temperatures still aged
+        self.sample([self.entity(),contact])
+        rows={r['entity_id']:r for r in server.latest_observations(self.now)}
+        self.assertTrue(rows['binary_sensor.window']['valid'])
+        self.assertFalse(rows['binary_sensor.window']['stale'])
+        later=self.now+timedelta(minutes=31)                                                  # own acquisition stopped
+        rows={r['entity_id']:r for r in server.latest_observations(later)}
+        self.assertTrue(rows['binary_sensor.window']['stale'])
+        self.assertFalse(rows['binary_sensor.window']['valid'])
     def test_http_version_and_validation(self):
         manifest=(Path(__file__).resolve().parents[1]/'config.yaml').read_text()
         self.assertEqual(re.search(r'^version:\s*(.+)$',manifest,re.M).group(1),server.VERSION)

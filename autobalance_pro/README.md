@@ -19,6 +19,13 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Unveröffentlichte Änderungen
+
+- AB-011: Das Meldealter (30 Minuten) wird nur noch für Temperaturwerte geprüft. Fenster-/Türkontakte und
+  Statusentitäten (Verdichter, Warmwasser, Pumpe) melden nur bei Zustandswechsel; für sie zählen
+  Erreichbarkeit (`unavailable`/`unknown`) und ein gültiger Zustand. Die Aktualität der eigenen Abfrage
+  wird weiterhin für alle Entitäten geprüft. Anlass: reale Anlage, Kontakte dauerhaft als „Veraltet“ markiert.
+
 ## Änderungen in v0.2.0 (freigegeben 21.11.2026)
 
 Enthält AB-001 (Logo), AB-008 (Datenmodell v2 mit Migration) und AB-009 (Oberfläche v2). Weiterhin rein lesend; keine Heizlastberechnung, keine hydraulische Empfehlung.
