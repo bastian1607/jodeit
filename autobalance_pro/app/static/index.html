@@ -25,62 +25,228 @@ input:focus,select:focus,.entity-search:focus{outline:2px solid #555;outline-off
 .brand-row{display:flex;align-items:center;gap:14px}
 .brand-logo{height:58px;width:auto;background:#fff;border-radius:6px;padding:4px 6px;flex:none}
 @media(max-width:650px){.brand-logo{height:46px}}
-</style></head><body><header><div class="brand-row"><img class="brand-logo" src="jodeit-logo.png" alt="Jodeit Systeme" width="96" height="58"><div><h1>Jodeit AutoBalance Pro</h1><small>v__APP_VERSION__ · Installationspilot</small></div></div><span class="tag">Nur Messung · keine Steuerbefehle</span></header><main><div id="acquisition-status" class="alert" role="status" aria-live="polite" aria-atomic="true">Messstatus wird geladen …</div><div id="notice" class="alert" role="status" aria-live="polite">Räume und Entitäten konfigurieren. Diese App greift nicht in die Heizung ein.</div><div class="tabs" id="tabs"><button class="active" data-tab="dashboard">Übersicht</button><button data-tab="rooms">1 Räume</button><button data-tab="zones">2 Thermische Zonen</button><button data-tab="heating">3 Wärmepumpe</button><button data-tab="samples">4 Messwerte</button></div>
-<section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div class="grid" id="stats"></div><p>Beginne mit den Räumen. Jeder Raum ist zuerst eine eigene geschlossene thermische Zone. Offene Bereiche kannst du anschließend verbinden.</p><button class="primary" onclick="tab('rooms')">Räume einrichten</button></section>
-<section id="rooms" class="tab hidden"><div class="panel"><div class="row"><h2>Räume</h2><button class="primary" onclick="editRoom()">+ Raum anlegen</button></div><div id="room-list"></div></div><div id="room-editor" class="panel hidden"><h2 id="room-heading">Raum</h2><form id="room-form"><div class="grid"><div><label>Raumname</label><input id="r-name" required maxlength="100"></div><div><label>Solltemperatur (°C)</label><input id="r-target" type="number" min="5" max="35" step="0.5" value="21" required></div><div><label>Heizlast (W), falls bekannt</label><input id="r-load" type="number" min="1" max="50000"></div><div><label>Fläche (m²), optional</label><input id="r-area" type="number" min="1" max="1000" step=".1"></div></div><h3>Temperatursensoren · mindestens 1</h3><div id="r-temperature"></div><h3>Fenster- und Türkontakte · optional</h3><div id="r-windows"></div><div class="row"><h3>Heizkörper</h3><button type="button" onclick="addRadiator()">+ Heizkörper</button></div><div id="r-radiators"></div><p class="hint">Stellmotor-Entitäten werden nur gespeichert und nie angesteuert.</p><button class="primary" type="submit">Raum speichern</button> <button type="button" onclick="cancelRoom()">Abbrechen</button></form></div></section>
-<section id="zones" class="panel tab hidden"><h2>Thermische Zonen</h2><p>Unzugeordnete Räume bilden automatisch geschlossene Einzelzonen. Für offene Bereiche zwei oder mehr Räume zu einer Zone kombinieren.</p><div id="zone-list"></div><hr><h3>Neue gemeinsame Zone</h3><form id="zone-form"><label>Zonenname</label><input id="z-name" required placeholder="z. B. Wohnzimmer und Küche"><label>Räume auswählen</label><div id="z-rooms" class="checks"></div><p><button class="primary" type="submit">Zone erstellen</button></p></form></section>
-<section id="heating" class="panel tab hidden"><h2>Wärmepumpe</h2><p>Die App verwendet bereits vorhandene Home-Assistant-Entitäten, etwa aus BBQKees/EMS-ESP. Steuerung und Heizkurvenverstellung sind deaktiviert.</p><form id="heating-form"><div class="grid"><div><label>Hersteller</label><input id="h-manufacturer"></div><div><label>Modell</label><input id="h-model"></div><div><label>Heizkreis</label><input id="h-circuit_name"></div><div><label>Außentemperatur</label><div id="h-outdoor"></div></div><div><label>Vorlauftemperatur</label><div id="h-flow"></div></div><div><label>Rücklauftemperatur</label><div id="h-return"></div></div><div><label>Verdichterstatus</label><div id="h-compressor"></div></div><div><label>Warmwasserstatus</label><div id="h-dhw"></div></div></div><p><button class="primary" type="submit">Zuordnung speichern</button></p></form><p class="hint">Weitere Heizkreise und Heizkurvenberechnung sind noch nicht implementiert.</p></section>
-<section id="samples" class="panel tab hidden"><h2>Aufgezeichnete Messwerte</h2><p>Alle fünf Minuten werden die zugeordneten Entitäten rein lesend erfasst. Noch keine 30-Tage-Auswertung.</p><button onclick="latest()">Aktualisieren</button><div id="sample-list"></div></section></main>
+/* AB-009: v2 editor */
+details.section{border:1px solid #dcdedb;border-radius:10px;margin:12px 0;background:#fff}
+details.section>summary{cursor:pointer;padding:12px 14px;font-weight:600;list-style:none;display:flex;justify-content:space-between;gap:8px;align-items:center}
+details.section>summary::-webkit-details-marker{display:none}
+details.section>summary:after{content:"▾";color:#555}
+details.section[open]>summary:after{content:"▴"}
+details.section>.body{padding:0 14px 14px}
+details.card{border:1px solid #dcdedb;border-radius:10px;margin:10px 0;background:#fafafa}
+details.card>summary{cursor:pointer;padding:11px 12px;display:flex;justify-content:space-between;gap:8px;align-items:center;list-style:none}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>.body{padding:0 12px 12px}
+.seg{display:flex;gap:8px;flex-wrap:wrap}
+.seg label{display:flex;align-items:center;gap:6px;border:1px solid #bacbd3;border-radius:8px;padding:9px 12px;margin:0;font-weight:500;cursor:pointer}
+.seg input{width:auto;margin:0}
+.unit{display:flex;align-items:center;gap:6px}
+.unit span{color:#5c6e79;font-size:13px;min-width:24px}
+.status{display:inline-block;font-size:12px;border-radius:12px;padding:3px 9px;background:#e9ecea;color:#303436}
+.status.warn{background:#fff2da;color:#6b4a00}
+.status.bad{background:#fde4e4;color:#941f1f}
+.status.good{background:#e1f4e9;color:#15583b}
+.warn-box{background:#fff2da;border-radius:8px;padding:10px;margin:8px 0;font-size:13px}
+.info-box{background:#eef2f4;border-radius:8px;padding:10px;margin:8px 0;font-size:13px}
+.pair-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin:6px 0}
+.blocker-link{display:block;width:100%;text-align:left;margin:6px 0;background:#fff}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.share-sum{font-weight:600}
+.share-sum.bad{color:#941f1f}
+@media(max-width:650px){.pair-row{grid-template-columns:1fr 1fr}.pair-row button{grid-column:1/-1}}
+</style></head><body><header><div class="brand-row"><img class="brand-logo" src="jodeit-logo.png" alt="Jodeit Systeme" width="96" height="58"><div><h1>Jodeit AutoBalance Pro</h1><small>v__APP_VERSION__ · Installationspilot</small></div></div><span class="tag">Nur Messung · keine Steuerbefehle</span></header>
+<main>
+<div id="acquisition-status" class="alert" role="status" aria-live="polite" aria-atomic="true">Messstatus wird geladen …</div>
+<div id="notice" class="alert" role="status" aria-live="polite">Räume und Entitäten konfigurieren. Diese App greift nicht in die Heizung ein.</div>
+<nav class="tabs" id="tabs">
+<button class="active" data-tab="dashboard">Übersicht</button>
+<button data-tab="rooms">1 Räume</button>
+<button data-tab="zones">2 Thermische Zonen</button>
+<button data-tab="plant">3 Heizungsanlage &amp; Heizkreise</button>
+<button data-tab="emitters">4 Heizflächen</button>
+<button data-tab="check">5 Prüfen &amp; Messung</button>
+</nav>
+
+<section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div class="grid" id="stats"></div>
+<p>Beginne mit den Räumen: Name und mindestens ein Temperaturfühler reichen für die Messung. Heizlast, Heizkreise und Heizflächen kannst du später ergänzen.</p>
+<button class="primary" data-goto="rooms">Räume einrichten</button></section>
+
+<section id="rooms" class="tab hidden">
+<div class="panel"><div class="row"><h2>Räume</h2><button class="primary" id="add-room">+ Raum anlegen</button></div><div id="room-list"></div></div>
+<div id="room-editor" class="panel hidden"><h2 id="room-heading">Raum</h2>
+<form id="room-form" novalidate>
+<details class="section" id="sec-basis" open><summary>Basis</summary><div class="body"><div class="grid">
+<div><label for="r-name">Raumname</label><input id="r-name" maxlength="100" autocomplete="off"></div>
+<div><label for="r-target">Solltemperatur</label><div class="unit"><input id="r-target" inputmode="decimal"><span>°C</span></div></div>
+<div><label for="r-area">Fläche, optional</label><div class="unit"><input id="r-area" inputmode="decimal"><span>m²</span></div></div>
+<div><label for="r-circuit">Standard-Heizkreis (Vorbelegung für neue Heizflächen)</label><select id="r-circuit"></select></div>
+</div></div></details>
+<details class="section" id="sec-sensors" open><summary>Sensoren</summary><div class="body">
+<h3>Temperatursensoren · mindestens 1</h3><div id="r-temperature"></div>
+<h3>Fenster- und Türkontakte · optional</h3><div id="r-windows"></div></div></details>
+<details class="section" id="sec-heat-load"><summary>Raumheizlast aus Berechnung übernehmen <span id="hl-badge" class="status"></span></summary><div class="body">
+<p class="hint">Wert aus vorhandener raumweiser Berechnung eintragen. AutoBalance berechnet die Heizlast nicht selbst.</p>
+<div class="seg" role="radiogroup" aria-label="Status Raumheizlast">
+<label><input type="radio" name="hl-status" value="missing"> Fehlt</label>
+<label><input type="radio" name="hl-status" value="adopted"> Übernommen</label></div>
+<div id="hl-legacy" class="warn-box hidden"></div>
+<div id="hl-fields" class="grid">
+<div><label for="hl-value">Raumheizlast</label><div class="unit"><input id="hl-value" inputmode="decimal"><span>W</span></div></div>
+<div><label for="hl-method">Verfahren / Norm</label><input id="hl-method" placeholder="z. B. DIN EN 12831-1"></div>
+<div><label for="hl-reference">Quelle / Dokumentbezeichnung</label><input id="hl-reference" placeholder="z. B. Heizlastberechnung, Software, Seite"></div>
+<div><label for="hl-date">Berechnungsdatum</label><input id="hl-date" type="date"></div>
+<div><label for="hl-author">Ersteller, optional</label><input id="hl-author"></div>
+</div></div></details>
+<details class="section" id="sec-emitters"><summary>Heizflächen <span id="em-badge" class="status"></span></summary><div class="body">
+<div id="r-radiators"></div>
+<div class="actions"><button type="button" id="add-emitter">+ Heizfläche</button></div>
+<div class="info-box"><span>Anteile an der Raumheizlast: </span><span id="share-sum" class="share-sum">–</span>
+<div class="actions"><button type="button" id="suggest-shares">Anteile vorschlagen</button></div><div id="share-hint" class="hint"></div></div>
+<p class="hint">Stellantrieb-Entitäten werden nur zugeordnet und nie angesteuert.</p></div></details>
+<div class="actions"><button class="primary" type="submit">Raum speichern</button><button type="button" id="cancel-room">Abbrechen</button></div>
+</form></div></section>
+
+<section id="zones" class="panel tab hidden"><h2>Thermische Zonen</h2><p>Unzugeordnete Räume bilden automatisch geschlossene Einzelzonen. Für offene Bereiche zwei oder mehr Räume zu einer Zone kombinieren. Heizkreise ändern sich dadurch nicht.</p>
+<div id="zone-list"></div><hr><h3>Neue gemeinsame Zone</h3>
+<form id="zone-form" novalidate><label for="z-name">Zonenname</label><input id="z-name" placeholder="z. B. Wohnzimmer und Küche"><label>Räume auswählen</label><div id="z-rooms" class="checks"></div><div class="actions"><button class="primary" type="submit">Zone erstellen</button></div></form></section>
+
+<section id="plant" class="panel tab hidden"><h2>Heizungsanlage &amp; Heizkreise</h2>
+<p class="hint">Nur Erfassung und lesende Zuordnung vorhandener Home-Assistant-Entitäten. Keine Steuerung der Wärmepumpe, keine Heizkurvenverstellung.</p>
+<form id="plant-form" novalidate>
+<details class="section" id="sec-building" open><summary>Gebäude</summary><div class="body"><div class="grid">
+<div><label for="b-name">Bezeichnung, optional</label><input id="b-name"></div>
+<div><label for="b-system">Heizsystem</label><select id="b-system"><option value="">Noch nicht festgelegt</option><option value="radiators">Heizkörper</option><option value="underfloor">Fußbodenheizung</option><option value="mixed">Gemischt</option></select></div>
+<div><label for="b-outdoor">Norm-Außentemperatur</label><div class="unit"><input id="b-outdoor" inputmode="decimal"><span>°C</span></div></div>
+<div><label for="b-outdoor-ref">Quelle Norm-Außentemperatur</label><input id="b-outdoor-ref"></div>
+</div></div></details>
+<details class="section" id="sec-heatpump" open><summary>Wärmepumpe</summary><div class="body"><div class="grid">
+<div><label for="hp-manufacturer">Hersteller</label><input id="hp-manufacturer"></div>
+<div><label for="hp-model">Modell</label><input id="hp-model"></div>
+<div><label for="hp-power">Nennheizleistung, optional</label><div class="unit"><input id="hp-power" inputmode="decimal"><span>kW</span></div></div>
+<div><label for="hp-minflow">Mindestvolumenstrom, optional</label><div class="unit"><input id="hp-minflow" inputmode="decimal"><span>l/h</span></div></div>
+<div><label for="hp-minflow-ref">Quelle Mindestvolumenstrom</label><input id="hp-minflow-ref" placeholder="Pflicht, wenn Mindestvolumenstrom angegeben"></div>
+<div><label>Außentemperatur (HA)</label><div id="hp-outdoor"></div></div>
+<div><label>Verdichterstatus (HA)</label><div id="hp-compressor"></div></div>
+<div><label>Warmwasserstatus (HA)</label><div id="hp-dhw"></div></div>
+</div></div></details>
+<div class="row"><h3>Heizkreise</h3><button type="button" id="add-circuit">+ Heizkreis</button></div>
+<div id="circuit-list"></div>
+<div class="actions"><button class="primary" type="submit">Anlage speichern</button><button type="button" id="reset-plant">Änderungen verwerfen</button></div>
+</form></section>
+
+<section id="emitters" class="panel tab hidden"><h2>Heizflächen</h2><p class="hint">Übersicht aller Heizflächen. Bearbeitet wird im jeweiligen Raum.</p><div id="emitter-overview"></div></section>
+
+<section id="check" class="tab hidden">
+<div class="panel"><h2>A · Passive Messung</h2>
+<p class="hint">Die Messung läuft automatisch alle fünf Minuten, sobald einem Raum ein Temperaturfühler zugeordnet ist. Fehlende Heizlast-, Heizkreis- oder Heizkörperdaten halten sie nicht an.</p>
+<div id="measure-list"></div>
+<h3>Aufgezeichnete Messwerte</h3><button id="refresh-samples">Aktualisieren</button><div id="sample-list"></div></div>
+<div class="panel"><h2>B · Vorbereitung hydraulischer Abgleich</h2>
+<p class="hint">Reine Prüfung der erfassten Daten. Eine Berechnung von Durchflüssen oder Ventilstufen ist noch nicht verfügbar.</p>
+<div id="readiness-list"></div></div>
+</section>
+</main>
 <script>
-let cfg={rooms:[],zones:[],heating:{}},entities=[],editing=null,rads=[];
-const el=id=>document.getElementById(id),safe=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+'use strict';
+let cfg=null,saved=null,entities=[],catalog=[],readinessData=null;
+let editingRoom=null,isNewRoom=false,roomDirty=false,plantDraft=null,plantDirty=false;
+let saveChain=Promise.resolve();
+const el=id=>document.getElementById(id);
+const safe=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+const clone=o=>JSON.parse(JSON.stringify(o));
+const TYPES={panel:'Plattenheizkörper',column:'Röhrenheizkörper',convector:'Konvektor',towel:'Badheizkörper',underfloor:'FBH-Kreis',other:'Sonstige'};
+const SOURCES={manufacturer:'Herstellerangabe',document:'Dokument',unknown:'Unbekannt'};
+
 function notice(t,bad=false){el('notice').textContent=t;el('notice').className='alert '+(bad?'error':'ok')}
-async function api(path,method='GET',obj){let r=await fetch('api/'+path,{method,headers:{'Content-Type':'application/json'},body:obj?JSON.stringify(obj):undefined}),d=await r.json();if(!r.ok)throw Error(d.error||'HTTP '+r.status);return d}
-async function save(){await api('config','POST',cfg);notice('Konfiguration gespeichert.');await stats()}
-function tab(t){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('hidden',x.id!==t));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));if(t==='rooms')showRooms();if(t==='zones')showZones();if(t==='heating')showHeating();if(t==='samples')latest();if(t==='dashboard')stats()}
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
-function classified(kind){return entities.filter(e=>kind==='temp'?(e.entity_id.startsWith('sensor.')&&(e.device_class==='temperature'||['°C','°F'].includes(e.unit))):kind==='window'?(e.entity_id.startsWith('binary_sensor.')&&['window','door','opening'].includes(e.device_class)):kind==='motor'?(e.entity_id.startsWith('number.')||e.entity_id.startsWith('climate.')):kind==='status'?(e.entity_id.startsWith('binary_sensor.')||e.entity_id.startsWith('sensor.')):e.entity_id.startsWith('sensor.'))}
-function options(kind,value='',blank=true){
-  let items=classified(kind);
-  if(value&&!items.find(e=>e.entity_id===value))items=[{entity_id:value,name:value+' (nicht verfügbar)',state:'unknown'},...items];
-  const list='<select aria-label="Entität auswählen">'+(blank?'<option value="">Keine Zuordnung</option>':'')+items.map(e=>'<option value="'+safe(e.entity_id)+'" '+(value===e.entity_id?'selected':'')+'>'+safe(e.name||e.entity_id)+' · '+safe(e.state)+'</option>').join('')+'</select>';
-  return '<div class="entity-single" data-kind="'+safe(kind)+'"><input type="search" aria-label="Entitäten durchsuchen" placeholder="Entität suchen (Name oder ID)…" oninput="filterSingle(this)">'+list+'</div>';
+async function api(path,method='GET',obj){
+  const r=await fetch('api/'+path,{method,headers:{'Content-Type':'application/json'},body:obj===undefined?undefined:JSON.stringify(obj)});
+  let d={};try{d=await r.json()}catch(_){}
+  if(!r.ok)throw Error(d.error||'HTTP '+r.status);
+  return d;
 }
-function filterSingle(input){
-  const root=input.closest('.entity-single'),select=root.querySelector('select'),chosen=select.value;
-  const query=input.value.trim().toLocaleLowerCase('de');
-  const matching=classified(root.dataset.kind).filter(e=>(String(e.name||'')+' '+e.entity_id).toLocaleLowerCase('de').includes(query));
-  if(chosen&&!matching.some(e=>e.entity_id===chosen))matching.unshift({entity_id:chosen,name:chosen+' (aktuell ausgewählt)',state:''});
-  select.replaceChildren();
-  const none=document.createElement('option');none.value='';none.textContent='Keine Zuordnung';select.append(none);
-  for(const e of matching){const opt=document.createElement('option');opt.value=e.entity_id;opt.textContent=(e.name||e.entity_id)+' · '+e.state;select.append(opt)}
-  select.value=chosen;
+/* Saves are serialised: never two overlapping POSTs with stale state (design §5). */
+function saveConfig(next){
+  const run=saveChain.then(async()=>{
+    await api('v2/config','POST',next);
+    cfg=clone(next);saved=clone(next);
+    await loadReadiness();
+  });
+  saveChain=run.catch(()=>{});
+  return run;
+}
+async function loadReadiness(){try{readinessData=await api('v2/readiness')}catch(_){readinessData=null}}
+
+/* ---------- numbers: accept decimal comma, never round silently ---------- */
+function parseNum(v){const t=String(v??'').trim().replace(/\s/g,'').replace(',','.');if(t==='')return null;const n=Number(t);return Number.isFinite(n)?n:NaN}
+function showNum(n){return n===null||n===undefined?'':String(n).replace('.',',')}
+function readNum(sel,label,errors,scope){const v=parseNum((scope||document).querySelector(sel).value);if(Number.isNaN(v)){errors.push(label+': keine gültige Zahl.');return null}return v}
+
+/* ---------- navigation and unsaved-change protection ---------- */
+function confirmLeave(){
+  if((roomDirty&&!el('room-editor').classList.contains('hidden'))||plantDirty)
+    return confirm('Es gibt ungespeicherte Änderungen. Verwerfen?');
+  return true;
+}
+function tab(t,force=false){
+  if(!force&&!confirmLeave())return false;
+  if(!force){roomDirty=false;plantDirty=false;plantDraft=null;el('room-editor').classList.add('hidden');editingRoom=null}
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('hidden',x.id!==t));
+  document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
+  ({rooms:showRooms,zones:showZones,plant:showPlant,emitters:showEmitterOverview,check:showCheck,dashboard:stats})[t]?.();
+  return true;
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
+document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.goto)));
+window.addEventListener('beforeunload',e=>{if(roomDirty||plantDirty){e.preventDefault();e.returnValue=''}});
+
+/* ---------- Home Assistant entity pickers (read-only assignment) ---------- */
+function classified(kind){return entities.filter(e=>kind==='temp'?(e.entity_id.startsWith('sensor.')&&(e.device_class==='temperature'||['°C','°F'].includes(e.unit))):kind==='window'?(e.entity_id.startsWith('binary_sensor.')&&['window','door','opening'].includes(e.device_class)):kind==='motor'?(e.entity_id.startsWith('number.')||e.entity_id.startsWith('climate.')):kind==='status'?(e.entity_id.startsWith('binary_sensor.')||e.entity_id.startsWith('sensor.')):e.entity_id.startsWith('sensor.'))}
+function single(container,kind,value,onchange){
+  const root=document.createElement('div');root.className='entity-single';
+  const search=document.createElement('input');search.type='search';search.setAttribute('aria-label','Entitäten durchsuchen');search.placeholder='Entität suchen (Name oder ID)…';
+  const select=document.createElement('select');select.setAttribute('aria-label','Entität auswählen');
+  function fill(){
+    const q=search.value.trim().toLocaleLowerCase('de'),chosen=select.value||value||'';
+    let items=classified(kind).filter(e=>(String(e.name||'')+' '+e.entity_id).toLocaleLowerCase('de').includes(q));
+    if(chosen&&!items.some(e=>e.entity_id===chosen)){const known=entities.find(e=>e.entity_id===chosen);items.unshift(known||{entity_id:chosen,name:chosen+' (nicht verfügbar)',state:'unknown'})}
+    select.replaceChildren();
+    const none=document.createElement('option');none.value='';none.textContent='Keine Zuordnung';select.append(none);
+    for(const e of items){const o=document.createElement('option');o.value=e.entity_id;o.textContent=(e.name||e.entity_id)+' · '+(e.state??'');select.append(o)}
+    select.value=chosen;value=chosen;
+  }
+  search.addEventListener('input',fill);
+  select.addEventListener('change',()=>{value=select.value;onchange&&onchange()});
+  root.append(search,select);container.replaceChildren(root);fill();
+  return ()=>select.value;
 }
 const entitySelections={};
-function checkItems(dest,kind,selected){
+function checkItems(dest,kind,selected,onchange){
   entitySelections[dest]=new Set(selected);
   const root=el(dest);
-  root.innerHTML='<details class="entity-picker"><summary><span class="picker-summary"></span><span class="entity-counter"></span></summary><div class="entity-panel"><input class="entity-search" type="search" aria-label="Entitäten durchsuchen" placeholder="Nach Name oder Entity-ID suchen…"><div class="entity-results"></div></div></details>';
-  const details=root.querySelector('details');
-  const search=root.querySelector('.entity-search');
-  const list=root.querySelector('.entity-results');
+  root.innerHTML='<details class="entity-picker"><summary><span class="picker-summary"></span><span class="entity-counter"></span></summary><div class="entity-panel"><input class="entity-search" type="search" aria-label="Entitäten durchsuchen" placeholder="Nach Name oder Entity-ID suchen…"><div class="entity-results"></div></div></details><div class="entity-chips"></div>';
+  const details=root.querySelector('details'),search=root.querySelector('.entity-search'),list=root.querySelector('.entity-results'),chips=root.querySelector('.entity-chips');
   function render(){
-    const q=search.value.trim().toLocaleLowerCase('de');
-    const all=classified(kind).slice();
-    for(const v of entitySelections[dest])if(!all.some(e=>e.entity_id===v))all.unshift({entity_id:v,name:v+' (nicht verfügbar)'});
+    const q=search.value.trim().toLocaleLowerCase('de'),all=classified(kind).slice(),chosen=entitySelections[dest];
+    for(const v of chosen)if(!all.some(e=>e.entity_id===v))all.unshift({entity_id:v,name:v+' (nicht verfügbar)'});
     const filtered=all.filter(e=>(String(e.name||'')+' '+e.entity_id).toLocaleLowerCase('de').includes(q));
-    const chosen=entitySelections[dest];
-    root.querySelector('.picker-summary').textContent=chosen.size?([...chosen].slice(0,2).map(id=>all.find(e=>e.entity_id===id)?.name||id).join(', ')+(chosen.size>2?' …':'')):'Entitäten auswählen';
+    root.querySelector('.picker-summary').textContent=chosen.size?'Weitere auswählen':'Entitäten auswählen';
     root.querySelector('.entity-counter').textContent=chosen.size+' ausgewählt';
+    chips.replaceChildren();
+    for(const id of chosen){
+      const chip=document.createElement('div');chip.className='item row';
+      const label=document.createElement('span');const ent=all.find(e=>e.entity_id===id);
+      label.textContent=(ent?.name||id)+' · '+id+(ent&&ent.state!==undefined?' · '+ent.state:'');
+      const rm=document.createElement('button');rm.type='button';rm.className='danger';rm.textContent='Entfernen';rm.setAttribute('aria-label',(ent?.name||id)+' entfernen');
+      rm.addEventListener('click',()=>{chosen.delete(id);render();onchange&&onchange()});
+      chip.append(label,rm);chips.append(chip);
+    }
     list.replaceChildren();
     if(!filtered.length){const msg=document.createElement('p');msg.className='hint';msg.textContent='Keine passenden Entitäten gefunden.';list.append(msg);return}
     for(const e of filtered){
       const row=document.createElement('label');row.className='entity-option';
       const input=document.createElement('input');input.type='checkbox';input.value=e.entity_id;input.checked=chosen.has(e.entity_id);
-      input.addEventListener('change',()=>{if(input.checked)chosen.add(e.entity_id);else chosen.delete(e.entity_id);render()});
-      const wrapper=document.createElement('span');
-      const title=document.createElement('span');title.textContent=e.name||e.entity_id;
-      const subtitle=document.createElement('small');subtitle.textContent=e.entity_id+' · '+(e.state??'kein Wert');
+      input.addEventListener('change',()=>{if(input.checked)chosen.add(e.entity_id);else chosen.delete(e.entity_id);render();onchange&&onchange()});
+      const wrapper=document.createElement('span'),title=document.createElement('span'),subtitle=document.createElement('small');
+      title.textContent=e.name||e.entity_id;subtitle.textContent=e.entity_id+' · '+(e.state??'kein Wert');
       wrapper.append(title,subtitle);row.append(input,wrapper);list.append(row);
     }
   }
@@ -89,42 +255,428 @@ function checkItems(dest,kind,selected){
   render();
 }
 function checked(dest){return entitySelections[dest]?[...entitySelections[dest]]:[...el(dest).querySelectorAll('input:checked')].map(x=>x.value)}
+
+/* ---------- status per room ---------- */
+function roomStatus(room){
+  if(!room.temperature_sensors.length)return ['Temperatursensor fehlt','bad'];
+  const r=readinessData?.rooms?.[room.id];
+  if(!r)return ['Messbereit','good'];
+  return r.blockers.length?['Messbereit · Angaben für Abgleich fehlen','warn']:['Messbereit · Auslegungsdaten vollständig – Berechnung noch nicht verfügbar','good'];
+}
+function badge(text,kind){const s=document.createElement('span');s.className='status '+(kind||'');s.textContent=text;return s}
+function circuitName(id){return cfg.circuits.find(c=>c.id===id)?.name||'Unbekannter Heizkreis'}
+
+/* ---------- 1 Räume ---------- */
 function showRooms(){
-  const list=el('room-list');
-  list.replaceChildren();
-  if(!cfg.rooms.length){const empty=document.createElement('p');empty.textContent='Keine Räume angelegt.';list.append(empty);return}
+  const list=el('room-list');list.replaceChildren();
+  if(!cfg.rooms.length){const p=document.createElement('p');p.textContent='Keine Räume angelegt.';list.append(p);return}
   for(const r of cfg.rooms){
     const item=document.createElement('div');item.className='item row';
-    const details=document.createElement('div');
-    const name=document.createElement('b');name.textContent=r.name;
-    details.append(name,document.createTextNode(' · '+r.target+' °C'));
-    const subtitle=document.createElement('div');subtitle.className='subtitle';
-    subtitle.textContent=r.temperature_sensors.length+' Temperaturfühler · '+r.window_sensors.length+' Fensterkontakte · '+r.radiators.length+' Heizkörper';
-    details.append(subtitle);
+    const info=document.createElement('div'),name=document.createElement('b');name.textContent=r.name;
+    info.append(name,document.createTextNode(' · '+showNum(r.target)+' °C'));
+    const sub=document.createElement('div');sub.className='subtitle';
+    const count=cfg.emitters.filter(e=>e.room_id===r.id).length;
+    sub.textContent=r.temperature_sensors.length+' Temperaturfühler · '+r.window_sensors.length+' Fensterkontakte · '+count+' Heizflächen';
+    const [text,kind]=roomStatus(r);
+    info.append(sub,badge(text,kind));
     const actions=document.createElement('div');
-    const edit=document.createElement('button');edit.textContent='Bearbeiten';edit.addEventListener('click',()=>editRoom(r.id));
-    const remove=document.createElement('button');remove.className='danger';remove.textContent='Löschen';remove.addEventListener('click',()=>deleteRoom(r.id));
-    actions.append(edit,document.createTextNode(' '),remove);item.append(details,actions);list.append(item);
+    const edit=document.createElement('button');edit.textContent='Bearbeiten';edit.addEventListener('click',()=>openRoom(r.id));
+    const del=document.createElement('button');del.className='danger';del.textContent='Löschen';del.addEventListener('click',()=>deleteRoom(r.id));
+    actions.append(edit,document.createTextNode(' '),del);item.append(info,actions);list.append(item);
   }
 }
-function editRoom(id=null){editing=id;let r=id?cfg.rooms.find(x=>x.id===id):{name:'',target:21,heat_load:null,area:null,temperature_sensors:[],window_sensors:[],radiators:[]};rads=structuredClone(r.radiators);el('room-editor').classList.remove('hidden');el('room-heading').textContent=id?'Raum bearbeiten':'Raum anlegen';for(let k of ['name','target'])el('r-'+k).value=r[k];el('r-load').value=r.heat_load??'';el('r-area').value=r.area??'';checkItems('r-temperature','temp',r.temperature_sensors);checkItems('r-windows','window',r.window_sensors);drawRadiators()}
-function cancelRoom(){el('room-editor').classList.add('hidden');editing=null}
-function collectRads(){return [...el('r-radiators').querySelectorAll('.radiator')].map(n=>({id:n.dataset.id||undefined,name:n.querySelector('.rad-name').value.trim(),entity:n.querySelector('.rad-entity select').value,valve_model:n.querySelector('.rad-model').value.trim(),power_w:n.querySelector('.rad-power').value||null}))}
-function addRadiator(){rads=collectRads();rads.push({name:'Heizkörper '+(rads.length+1),entity:'',valve_model:'',power_w:null});drawRadiators()}
-function removeRadiator(i){rads=collectRads();rads.splice(i,1);drawRadiators()}
-function drawRadiators(){el('r-radiators').innerHTML=rads.map((r,i)=>'<div class="item radiator" data-id="'+safe(r.id||'')+'"><div class="row"><b>Heizkörper '+(i+1)+'</b><button type="button" class="danger" onclick="removeRadiator('+i+')">Entfernen</button></div><div class="grid"><div><label>Bezeichnung</label><input class="rad-name" value="'+safe(r.name)+'"></div><div><label>Stellmotor-Entität</label><div class="rad-entity">'+options('motor',r.entity)+'</div></div><div><label>Ventilunterteil</label><input class="rad-model" value="'+safe(r.valve_model||'')+'"></div><div><label>Heizkörperleistung (W), optional</label><input class="rad-power" type="number" value="'+safe(r.power_w??'')+'"></div></div></div>').join('')}
-el('room-form').onsubmit=async e=>{e.preventDefault();let r={id:editing||crypto.randomUUID(),name:el('r-name').value.trim(),target:Number(el('r-target').value),heat_load:el('r-load').value||null,area:el('r-area').value||null,temperature_sensors:checked('r-temperature'),window_sensors:checked('r-windows'),radiators:collectRads()};if(!r.temperature_sensors.length)return notice('Bitte einen Temperatursensor auswählen.',true);let old=structuredClone(cfg);if(editing)cfg.rooms=cfg.rooms.map(x=>x.id===editing?r:x);else cfg.rooms.push(r);try{await save();cancelRoom();showRooms()}catch(ex){cfg=old;notice(ex.message,true)}};
-async function deleteRoom(id){if(!confirm('Raum löschen?'))return;let old=structuredClone(cfg);cfg.rooms=cfg.rooms.filter(r=>r.id!==id);cfg.zones=cfg.zones.map(z=>({...z,room_ids:z.room_ids.filter(x=>x!==id)})).filter(z=>z.room_ids.length>=2);try{await save();showRooms()}catch(ex){cfg=old;notice(ex.message,true)}}
-function showZones(){let used=new Set(cfg.zones.flatMap(z=>z.room_ids));el('zone-list').innerHTML=cfg.zones.map((z,i)=>'<div class="item row"><div><b>'+safe(z.name)+'</b><div class="hint">'+z.room_ids.map(id=>safe(cfg.rooms.find(r=>r.id===id)?.name||'')).join(' + ')+'</div></div><button class="danger" onclick="delZone('+i+')">Auflösen</button></div>').join('')+cfg.rooms.filter(r=>!used.has(r.id)).map(r=>'<div class="item">'+safe(r.name)+' <span class="tag">Geschlossene Einzelzone</span></div>').join('');el('z-rooms').innerHTML=cfg.rooms.map(r=>'<label><input type="checkbox" value="'+safe(r.id)+'" '+(used.has(r.id)?'disabled':'')+'>'+safe(r.name)+'</label>').join('')}
-el('zone-form').onsubmit=async e=>{e.preventDefault();let ids=checked('z-rooms');if(ids.length<2)return notice('Mindestens zwei Räume auswählen.',true);let old=structuredClone(cfg);cfg.zones.push({id:crypto.randomUUID(),name:el('z-name').value.trim(),room_ids:ids});try{await save();el('z-name').value='';showZones()}catch(ex){cfg=old;notice(ex.message,true)}};
-async function delZone(i){let old=structuredClone(cfg);cfg.zones.splice(i,1);try{await save();showZones()}catch(ex){cfg=old;notice(ex.message,true)}}
-function showHeating(){for(let k of ['manufacturer','model','circuit_name'])el('h-'+k).value=cfg.heating[k]||'';for(let k of ['outdoor','flow','return','compressor','dhw'])el('h-'+k).innerHTML=options(['compressor','dhw'].includes(k)?'status':'temp',cfg.heating[k]||'')}
-el('heating-form').onsubmit=async e=>{e.preventDefault();let old=structuredClone(cfg);for(let k of ['manufacturer','model','circuit_name'])cfg.heating[k]=el('h-'+k).value.trim();for(let k of ['outdoor','flow','return','compressor','dhw'])cfg.heating[k]=el('h-'+k).querySelector('select').value;try{await save()}catch(ex){cfg=old;notice(ex.message,true)}};
-function dateText(value){
-  if(!value)return 'Noch nicht vorhanden';
-  const parsed=new Date(value);
-  return Number.isNaN(parsed.getTime())?'Zeitpunkt unbekannt':parsed.toLocaleString('de-DE');
+el('add-room').addEventListener('click',()=>openRoom(null));
+let roomEmitters=[];
+function newRoom(){return {id:crypto.randomUUID(),name:'',target:21,area:null,default_circuit_id:cfg.circuits[0]?.id||null,
+  heat_load:{status:'missing',value_w:null,method:'',reference:'',author:'',date:null,legacy_value_w:null},temperature_sensors:[],window_sensors:[]}}
+function openRoom(id,emitterId=null,sectionId=null){
+  if(!el('room-editor').classList.contains('hidden')&&roomDirty&&!confirm('Es gibt ungespeicherte Änderungen. Verwerfen?'))return;
+  if(el('rooms').classList.contains('hidden')&&!tab('rooms'))return;
+  const room=id?clone(cfg.rooms.find(r=>r.id===id)):newRoom();
+  isNewRoom=!id;editingRoom=room;roomEmitters=clone(cfg.emitters.filter(e=>e.room_id===room.id));
+  el('room-heading').textContent=id?'Raum bearbeiten':'Raum anlegen';
+  el('r-name').value=room.name;el('r-target').value=showNum(room.target);el('r-area').value=showNum(room.area);
+  fillCircuitSelect(el('r-circuit'),room.default_circuit_id,true);
+  checkItems('r-temperature','temp',room.temperature_sensors,markRoomDirty);
+  checkItems('r-windows','window',room.window_sensors,markRoomDirty);
+  const hl=room.heat_load;
+  document.querySelector('input[name=hl-status][value='+(hl.status==='adopted'?'adopted':'missing')+']').checked=true;
+  el('hl-value').value=showNum(hl.value_w);el('hl-method').value=hl.method||'';el('hl-reference').value=hl.reference||'';el('hl-date').value=hl.date||'';el('hl-author').value=hl.author||'';
+  const legacy=el('hl-legacy');
+  legacy.classList.toggle('hidden',hl.legacy_value_w===null||hl.legacy_value_w===undefined);
+  legacy.textContent='Alter, nicht belegter Wert: '+showNum(hl.legacy_value_w)+' W. Bitte anhand der Berechnung prüfen. Er wird nicht automatisch übernommen.';
+  syncHeatLoad();drawEmitters();
+  el('room-editor').classList.remove('hidden');roomDirty=false;
+  el('share-hint').textContent='';
+  let target=sectionId?el(sectionId):null;
+  if(emitterId){el('sec-emitters').open=true;target=document.querySelector('#r-radiators details[data-id="'+CSS.escape(emitterId)+'"]');if(target)target.open=true}
+  else if(sectionId&&target)target.open=true;
+  (target||el('room-editor')).scrollIntoView({block:'start'});
 }
+function markRoomDirty(){roomDirty=true;updateShareSum()}
+el('room-form').addEventListener('input',markRoomDirty);
+el('room-form').addEventListener('change',e=>{markRoomDirty();if(e.target.name==='hl-status')syncHeatLoad()});
+function syncHeatLoad(){
+  const adopted=document.querySelector('input[name=hl-status]:checked').value==='adopted';
+  el('hl-fields').classList.toggle('hidden',!adopted);
+  const b=el('hl-badge');b.textContent=adopted?'Übernommen':'Fehlt';b.className='status '+(adopted?'good':'warn');
+}
+function fillCircuitSelect(select,value,allowNone){
+  select.replaceChildren();
+  if(allowNone){const o=document.createElement('option');o.value='';o.textContent='Kein Standard';select.append(o)}
+  for(const c of cfg.circuits){const o=document.createElement('option');o.value=c.id;o.textContent=c.name;select.append(o)}
+  select.value=value??'';
+}
+function valveKey(v){
+  const hit=catalog.find(c=>c.manufacturer===v.manufacturer&&c.series===v.series);
+  if(hit)return hit.key;
+  return (v.manufacturer||v.series)?'other':'unknown';
+}
+function emitterCard(e,index){
+  const card=document.createElement('details');card.className='card emitter radiator';card.dataset.id=e.id;
+  const sum=document.createElement('summary');const title=document.createElement('b');title.className='em-title';title.textContent=e.name||('Heizfläche '+(index+1));
+  sum.append(title,badge(TYPES[e.type]||'Typ offen'));card.append(sum);
+  const body=document.createElement('div');body.className='body';card.append(body);
+  const v=e.valve,o=e.rated_output;
+  const legacyPower=o.value_w!==null&&o.value_w!==undefined&&o.flow_c===null&&o.source==='unknown';
+  body.innerHTML=
+   '<h3>Zuordnung</h3><div class="grid">'+
+   '<div><label>Bezeichnung</label><input class="rad-name e-name" value="'+safe(e.name)+'"></div>'+
+   '<div><label>Typ</label><select class="e-type"><option value="">Noch offen</option>'+Object.entries(TYPES).map(([k,t])=>'<option value="'+k+'"'+(e.type===k?' selected':'')+'>'+t+'</option>').join('')+'</select></div>'+
+   '<div><label>Heizkreis (maßgeblich)</label><select class="e-circuit"></select></div></div>'+
+   '<div class="warn-box e-ufh'+(e.type==='underfloor'?'':' hidden')+'">FBH-Kreise werden erfasst, eine Berechnung für Fußbodenheizung ist noch nicht verfügbar. Das Heizkörperverfahren wird nicht auf FBH übertragen.</div>'+
+   '<h3>Bauform</h3><div class="grid">'+
+   '<div><label>Bauart</label><input class="e-construction" placeholder="z. B. Typ 22" value="'+safe(e.construction)+'"></div>'+
+   '<div><label>Höhe</label><div class="unit"><input class="e-height" inputmode="decimal" value="'+safe(showNum(e.height_mm))+'"><span>mm</span></div></div>'+
+   '<div><label>Länge</label><div class="unit"><input class="e-length" inputmode="decimal" value="'+safe(showNum(e.length_mm))+'"><span>mm</span></div></div></div>'+
+   '<h3>Leistung aus Datenblatt</h3>'+
+   (legacyPower?'<div class="warn-box">Bezugstemperaturen unbekannt, bitte aus Datenblatt bestätigen. Der Wert gilt bis dahin als ungeprüft.</div>':'')+
+   '<div class="grid">'+
+   '<div><label>Wärmeleistung</label><div class="unit"><input class="rad-power e-power" inputmode="decimal" value="'+safe(showNum(o.value_w))+'"><span>W</span></div></div>'+
+   '<div><label>Quelle</label><select class="e-source">'+Object.entries(SOURCES).map(([k,t])=>'<option value="'+k+'"'+(o.source===k?' selected':'')+'>'+t+'</option>').join('')+'</select></div>'+
+   '<div><label>Referenz Vorlauf</label><div class="unit"><input class="e-flow" inputmode="decimal" value="'+safe(showNum(o.flow_c))+'"><span>°C</span></div></div>'+
+   '<div><label>Referenz Rücklauf</label><div class="unit"><input class="e-return" inputmode="decimal" value="'+safe(showNum(o.return_c))+'"><span>°C</span></div></div>'+
+   '<div><label>Referenz Raum</label><div class="unit"><input class="e-room" inputmode="decimal" value="'+safe(showNum(o.room_c))+'"><span>°C</span></div></div>'+
+   '<div><label>Quellenangabe</label><input class="e-ref" placeholder="z. B. Katalog, Seite" value="'+safe(o.reference)+'"></div></div>'+
+   '<h3>Anteil an Raumheizlast</h3><div class="grid"><div><label>Anteil</label><div class="unit"><input class="e-share" inputmode="decimal" value="'+safe(showNum(e.load_share_percent))+'"><span>%</span></div></div></div>'+
+   '<h3>Ventil</h3><div class="grid">'+
+   '<div><label>Ventil</label><select class="e-valve">'+catalog.map(c=>'<option value="'+safe(c.key)+'">'+safe(c.manufacturer+' · '+c.series)+'</option>').join('')+'<option value="other">Anderes Ventil</option><option value="unknown">Noch unbekannt</option></select></div>'+
+   '<div class="e-other"><label>Hersteller</label><input class="e-v-manufacturer" value="'+safe(v.manufacturer)+'"></div>'+
+   '<div class="e-other"><label>Serie</label><input class="e-v-series" value="'+safe(v.series)+'"></div>'+
+   '<div><label>Variante, optional</label><input class="e-v-variant" value="'+safe(v.variant)+'"></div>'+
+   '<div><label>Dimension (DN), optional</label><input class="e-v-dimension" value="'+safe(v.dimension)+'"></div>'+
+   '<div><label>Aktuelle Voreinstellung, optional</label><input class="e-v-setting" value="'+safe(v.current_setting)+'"></div>'+
+   '<div><label>Notiz zum Ventil</label><input class="rad-model e-v-label" value="'+safe(v.label)+'"></div></div>'+
+   '<p class="hint">Aus der Ventilangabe wird keine Kennlinie, kein Durchfluss und keine Einstellstufe abgeleitet.</p>'+
+   '<details class="card"><summary>Weitere Fachangaben</summary><div class="body"><div class="grid"><div><label>Heizkörperexponent n</label><input class="e-exponent" inputmode="decimal" value="'+safe(showNum(e.exponent))+'"></div></div></div></details>'+
+   '<h3>Stellantrieb (nur Zuordnung)</h3><div class="rad-entity"></div>'+
+   '<div class="actions"><button type="button" class="danger e-remove">Heizfläche entfernen</button></div>';
+  const circuit=body.querySelector('.e-circuit');fillCircuitSelect(circuit,e.circuit_id,false);
+  const valve=body.querySelector('.e-valve');valve.value=valveKey(v);
+  const syncValve=()=>body.querySelectorAll('.e-other').forEach(x=>x.classList.toggle('hidden',valve.value!=='other'));
+  valve.addEventListener('change',syncValve);syncValve();
+  body.querySelector('.e-type').addEventListener('change',ev=>{body.querySelector('.e-ufh').classList.toggle('hidden',ev.target.value!=='underfloor');sum.lastChild.textContent=TYPES[ev.target.value]||'Typ offen'});
+  body.querySelector('.e-name').addEventListener('input',ev=>{title.textContent=ev.target.value||('Heizfläche '+(index+1))});
+  card._actuator=single(body.querySelector('.rad-entity'),'motor',e.actuator_entity||'',markRoomDirty);
+  body.querySelector('.e-remove').addEventListener('click',()=>{roomEmitters=collectEmitters(true);roomEmitters.splice(index,1);drawEmitters();markRoomDirty()});
+  return card;
+}
+function drawEmitters(){
+  const root=el('r-radiators');root.replaceChildren();
+  roomEmitters.forEach((e,i)=>root.append(emitterCard(e,i)));
+  el('em-badge').textContent=roomEmitters.length+' erfasst';
+  updateShareSum();
+}
+el('add-emitter').addEventListener('click',()=>{
+  roomEmitters=collectEmitters(true);
+  const fallback=el('r-circuit').value||cfg.circuits[0].id;
+  roomEmitters.push({id:'hf_'+crypto.randomUUID().replaceAll('-','').slice(0,12),room_id:editingRoom.id,circuit_id:fallback,name:'Heizfläche '+(roomEmitters.length+1),type:null,construction:'',height_mm:null,length_mm:null,
+    rated_output:{value_w:null,flow_c:null,return_c:null,room_c:null,source:'unknown',reference:''},exponent:null,load_share_percent:null,
+    valve:{label:'',manufacturer:'',series:'',variant:'',dimension:'',current_setting:''},actuator_entity:''});
+  drawEmitters();markRoomDirty();
+  const cards=el('r-radiators').querySelectorAll('details.emitter');cards[cards.length-1].open=true;
+});
+/* Reads the emitter cards. lenient=true keeps raw text for redraws without validation. */
+function collectEmitters(lenient=false,errors=[]){
+  return [...el('r-radiators').querySelectorAll('details.emitter')].map((card,i)=>{
+    const q=s=>card.querySelector(s),name=q('.e-name').value.trim()||('Heizfläche '+(i+1));
+    const n=(s,label)=>{const v=parseNum(q(s).value);if(Number.isNaN(v)){if(!lenient)errors.push(name+' – '+label+': keine gültige Zahl.');return null}return v};
+    const valveSel=q('.e-valve').value,cat=catalog.find(c=>c.key===valveSel);
+    return {id:card.dataset.id,room_id:editingRoom.id,circuit_id:q('.e-circuit').value,name,type:q('.e-type').value||null,
+      construction:q('.e-construction').value.trim(),height_mm:n('.e-height','Höhe'),length_mm:n('.e-length','Länge'),
+      rated_output:{value_w:n('.e-power','Wärmeleistung'),flow_c:n('.e-flow','Referenz Vorlauf'),return_c:n('.e-return','Referenz Rücklauf'),room_c:n('.e-room','Referenz Raum'),source:q('.e-source').value,reference:q('.e-ref').value.trim()},
+      exponent:n('.e-exponent','Exponent'),load_share_percent:n('.e-share','Anteil'),
+      valve:{label:q('.e-v-label').value.trim(),
+        manufacturer:cat?cat.manufacturer:valveSel==='other'?q('.e-v-manufacturer').value.trim():'',
+        series:cat?cat.series:valveSel==='other'?q('.e-v-series').value.trim():'',
+        variant:q('.e-v-variant').value.trim(),dimension:q('.e-v-dimension').value.trim(),current_setting:q('.e-v-setting').value.trim()},
+      actuator_entity:card._actuator?card._actuator():''};
+  });
+}
+function updateShareSum(){
+  const values=[...el('r-radiators').querySelectorAll('.e-share')].map(x=>parseNum(x.value));
+  const given=values.filter(v=>v!==null&&!Number.isNaN(v)),out=el('share-sum');
+  if(!given.length){out.textContent=values.length>1?'noch nicht verteilt':'–';out.className='share-sum';return}
+  const total=given.reduce((a,b)=>a+b,0),ok=given.length===values.length&&Math.abs(total-100)<=0.5;
+  out.textContent='zusammen '+showNum(Math.round(total*10)/10)+' %'+(given.length<values.length?' (nicht alle Heizflächen ausgefüllt)':'');
+  out.className='share-sum'+(ok?'':' bad');
+}
+el('suggest-shares').addEventListener('click',async()=>{
+  const errors=[],draft=buildRoomDraft(errors,false);
+  if(!draft)return;
+  const next=clone(cfg);applyRoom(next,draft.room,draft.emitters);
+  for(const e of next.emitters)if(e.room_id===draft.room.id)e.load_share_percent=null;
+  try{
+    const r=await api('v2/load-share-suggestion','POST',{config:next,room_id:draft.room.id});
+    if(!r.shares){el('share-hint').textContent='Kein Vorschlag: '+r.reason+' Anteile können manuell aus einer Planung eingetragen werden.';return}
+    for(const card of el('r-radiators').querySelectorAll('details.emitter'))card.querySelector('.e-share').value=showNum(r.shares[card.dataset.id]);
+    el('share-hint').textContent='Vorschlag eingetragen (bezogen auf die Auslegungstemperaturen der Heizkreise). Bitte prüfen; gespeichert wird erst mit „Raum speichern“.';
+    markRoomDirty();
+  }catch(ex){el('share-hint').textContent='Kein Vorschlag möglich: '+ex.message}
+});
+/* Builds room + emitters from the form with installer-friendly group validation. */
+function buildRoomDraft(errors,strict=true){
+  const name=el('r-name').value.trim();
+  if(!name)errors.push('Bitte einen Raumnamen eingeben.');
+  const target=readNum('#r-target','Solltemperatur',errors);
+  if(target===null)errors.push('Bitte eine Solltemperatur angeben.');
+  else if(target<5||target>35)errors.push('Solltemperatur muss zwischen 5 und 35 °C liegen.');
+  const area=readNum('#r-area','Fläche',errors);
+  const temps=checked('r-temperature');
+  if(!temps.length)errors.push('Für '+(name||'diesen Raum')+' fehlt noch ein Temperatursensor. Bitte eine Home-Assistant-Entität auswählen.');
+  const adopted=document.querySelector('input[name=hl-status]:checked').value==='adopted';
+  const prev=editingRoom.heat_load;
+  let heat_load={status:'missing',value_w:null,method:'',reference:'',author:'',date:null,legacy_value_w:prev.legacy_value_w??null};
+  if(adopted){
+    const value=readNum('#hl-value','Raumheizlast',errors),method=el('hl-method').value.trim(),reference=el('hl-reference').value.trim(),date=el('hl-date').value;
+    if(value===null||!method||!reference||!date)errors.push('Bitte Wert, Berechnungsverfahren, Dokumentquelle und Datum gemeinsam eintragen.');
+    else if(value<1||value>50000)errors.push('Raumheizlast muss zwischen 1 und 50 000 W liegen.');
+    heat_load={status:'adopted',value_w:value,method,reference,author:el('hl-author').value.trim(),date:date||null,legacy_value_w:prev.legacy_value_w??null};
+  }
+  const emitters=collectEmitters(false,errors);
+  for(const e of emitters){
+    const t=[e.rated_output.flow_c,e.rated_output.return_c,e.rated_output.room_c];
+    if(t.some(x=>x===null)&&t.some(x=>x!==null))errors.push(e.name+': Bitte alle drei Referenztemperaturen der Heizkörperleistung angeben oder alle leer lassen.');
+    else if(t[0]!==null&&!(t[0]>t[1]&&t[1]>t[2]))errors.push(e.name+': Referenztemperaturen müssen Vorlauf > Rücklauf > Raum erfüllen.');
+  }
+  if(strict){
+    const shares=emitters.map(e=>e.load_share_percent),given=shares.filter(x=>x!==null);
+    if(given.length&&(given.length!==shares.length||Math.abs(given.reduce((a,b)=>a+b,0)-100)>0.5))
+      errors.push('Heizlastanteile: zusammen '+showNum(Math.round(given.reduce((a,b)=>a+b,0)*10)/10)+' %. Bitte für alle Heizflächen ausfüllen und auf 100 % vervollständigen – oder alle Anteile leer lassen.');
+  }
+  if(errors.length){notice(errors.join(' '),true);return null}
+  const room={...editingRoom,name,target,area,default_circuit_id:el('r-circuit').value||null,heat_load,temperature_sensors:temps,window_sensors:checked('r-windows')};
+  return {room,emitters};
+}
+function applyRoom(next,room,emitters){
+  const i=next.rooms.findIndex(r=>r.id===room.id);
+  if(i>=0)next.rooms[i]=room;else next.rooms.push(room);
+  next.emitters=next.emitters.filter(e=>e.room_id!==room.id).concat(emitters);
+}
+el('room-form').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const draft=buildRoomDraft([]);if(!draft)return;
+  const next=clone(cfg);applyRoom(next,draft.room,draft.emitters);
+  try{await saveConfig(next);roomDirty=false;el('room-editor').classList.add('hidden');editingRoom=null;notice('Konfiguration gespeichert.');showRooms();stats()}
+  catch(ex){notice('Nicht gespeichert: '+ex.message,true)}   // form stays open with all entries
+});
+el('cancel-room').addEventListener('click',()=>{if(roomDirty&&!confirm('Es gibt ungespeicherte Änderungen. Verwerfen?'))return;roomDirty=false;el('room-editor').classList.add('hidden');editingRoom=null});
+async function deleteRoom(id){
+  const room=cfg.rooms.find(r=>r.id===id),n=cfg.emitters.filter(e=>e.room_id===id).length;
+  if(!confirm('Raum „'+(room?.name||'')+'“ löschen?'+(n?' Dabei werden '+n+' Heizflächen entfernt.':'')))return;
+  const next=clone(cfg);
+  next.rooms=next.rooms.filter(r=>r.id!==id);next.emitters=next.emitters.filter(e=>e.room_id!==id);
+  next.zones=next.zones.map(z=>({...z,room_ids:z.room_ids.filter(x=>x!==id)})).filter(z=>z.room_ids.length>=2);
+  try{await saveConfig(next);notice('Konfiguration gespeichert.');showRooms()}catch(ex){notice('Nicht gelöscht: '+ex.message,true)}
+}
+
+/* ---------- 2 Zonen ---------- */
+function showZones(){
+  const used=new Set(cfg.zones.flatMap(z=>z.room_ids)),list=el('zone-list');list.replaceChildren();
+  cfg.zones.forEach((z,i)=>{
+    const item=document.createElement('div');item.className='item row';
+    const info=document.createElement('div'),b=document.createElement('b');b.textContent=z.name;
+    const h=document.createElement('div');h.className='hint';h.textContent=z.room_ids.map(id=>cfg.rooms.find(r=>r.id===id)?.name||'').join(' + ');
+    info.append(b,h);
+    const del=document.createElement('button');del.className='danger';del.textContent='Auflösen';del.addEventListener('click',()=>delZone(i));
+    item.append(info,del);list.append(item);
+  });
+  for(const r of cfg.rooms.filter(r=>!used.has(r.id))){const item=document.createElement('div');item.className='item';item.append(document.createTextNode(r.name+' '),badge('Geschlossene Einzelzone'));list.append(item)}
+  const box=el('z-rooms');box.replaceChildren();
+  for(const r of cfg.rooms){
+    const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=r.id;input.disabled=used.has(r.id);
+    label.append(input,document.createTextNode(r.name+(used.has(r.id)?' (bereits in einer Zone)':'')));box.append(label);
+  }
+}
+el('zone-form').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const ids=[...el('z-rooms').querySelectorAll('input:checked')].map(x=>x.value),name=el('z-name').value.trim();
+  if(!name)return notice('Bitte einen Zonennamen eingeben.',true);
+  if(ids.length<2)return notice('Mindestens zwei Räume auswählen.',true);
+  const used=cfg.zones.find(z=>z.room_ids.some(id=>ids.includes(id)));
+  if(used)return notice('Der Raum ist bereits der Zone „'+used.name+'“ zugeordnet.',true);
+  const next=clone(cfg);next.zones.push({id:crypto.randomUUID(),name,room_ids:ids});
+  try{await saveConfig(next);el('z-name').value='';notice('Konfiguration gespeichert.');showZones()}catch(ex){notice('Nicht gespeichert: '+ex.message,true)}
+});
+async function delZone(i){const next=clone(cfg);next.zones.splice(i,1);try{await saveConfig(next);notice('Konfiguration gespeichert.');showZones()}catch(ex){notice(ex.message,true)}}
+
+/* ---------- 3 Heizungsanlage & Heizkreise ---------- */
+const plantPickers={};
+function showPlant(){
+  plantDraft=clone({building:cfg.building,circuits:cfg.circuits});plantDirty=false;
+  const b=plantDraft.building,hp=b.heat_pump;
+  el('b-name').value=b.name||'';el('b-system').value=b.heating_system||'';el('b-outdoor').value=showNum(b.design_outdoor_c);el('b-outdoor-ref').value=b.design_outdoor_reference||'';
+  el('hp-manufacturer').value=hp.manufacturer||'';el('hp-model').value=hp.model||'';el('hp-power').value=showNum(hp.nominal_power_kw);el('hp-minflow').value=showNum(hp.min_flow_l_h);el('hp-minflow-ref').value=hp.min_flow_reference||'';
+  plantPickers.outdoor=single(el('hp-outdoor'),'temp',b.entities.outdoor,markPlantDirty);
+  plantPickers.compressor=single(el('hp-compressor'),'status',b.entities.compressor,markPlantDirty);
+  plantPickers.dhw=single(el('hp-dhw'),'status',b.entities.dhw,markPlantDirty);
+  drawCircuits();
+}
+function markPlantDirty(){plantDirty=true}
+el('plant-form').addEventListener('input',markPlantDirty);el('plant-form').addEventListener('change',markPlantDirty);
+function pairRow(container,a,b,labels,onRemove){
+  const row=document.createElement('div');row.className='pair-row';
+  row.innerHTML='<div><label>'+labels[0]+'</label><input class="p-a" value="'+safe(a)+'"'+(labels[2]?' inputmode="decimal"':'')+'></div><div><label>'+labels[1]+'</label><input class="p-b" value="'+safe(b)+'"'+(labels[3]?' inputmode="decimal"':'')+'></div>';
+  const rm=document.createElement('button');rm.type='button';rm.className='danger';rm.textContent='Entfernen';rm.addEventListener('click',()=>{row.remove();markPlantDirty();onRemove&&onRemove()});
+  row.append(rm);container.append(row);
+}
+function circuitCard(c){
+  const card=document.createElement('details');card.className='card circuit';card.dataset.id=c.id;
+  const sum=document.createElement('summary'),title=document.createElement('b');title.textContent=c.name;
+  const used=cfg.emitters.filter(e=>e.circuit_id===c.id).length;
+  sum.append(title,badge(used+' Heizflächen'));card.append(sum);
+  const body=document.createElement('div');body.className='body';card.append(body);
+  const hc=c.heating_curve;
+  body.innerHTML='<div class="grid">'+
+   '<div><label>Name</label><input class="c-name" value="'+safe(c.name)+'"></div>'+
+   '<div><label>Art</label><select class="c-mixing"><option value="">Noch offen</option><option value="unmixed">Ungemischt</option><option value="mixed">Gemischt</option></select></div>'+
+   '<div><label>Heizflächenart</label><select class="c-type"><option value="">Noch offen</option><option value="radiators">Heizkörper</option><option value="underfloor">Fußbodenheizung</option><option value="mixed">Gemischt</option></select></div>'+
+   '<div><label>Auslegungsvorlauf</label><div class="unit"><input class="c-flow" inputmode="decimal" value="'+safe(showNum(c.design_flow_c))+'"><span>°C</span></div></div>'+
+   '<div><label>Auslegungsrücklauf</label><div class="unit"><input class="c-return" inputmode="decimal" value="'+safe(showNum(c.design_return_c))+'"><span>°C</span></div></div></div>'+
+   '<h3>Messentitäten (nur lesend)</h3><div class="grid"><div><label>Vorlauf Ist</label><div class="c-e-flow"></div></div><div><label>Vorlauf Soll</label><div class="c-e-flow_target"></div></div><div><label>Rücklauf</label><div class="c-e-return"></div></div><div><label>Pumpe</label><div class="c-e-pump"></div></div></div>'+
+   '<details class="card"><summary>Heizkurve erfassen</summary><div class="body"><p class="hint">Entweder keine oder 2–10 Stützpunkte. Nur Dokumentation – es wird nichts an die Wärmepumpe geschrieben.</p><div class="c-points"></div><button type="button" class="c-add-point">+ Stützpunkt</button>'+
+   '<h3>Herstellerparameter, optional</h3><div class="c-params"></div><button type="button" class="c-add-param">+ Parameter</button>'+
+   '<div class="grid"><div><label>Quelle</label><input class="c-curve-ref" value="'+safe(hc.reference)+'"></div><div><label>Notiz</label><input class="c-curve-note" value="'+safe(hc.note)+'"></div></div></div></details>'+
+   '<div class="actions"><button type="button" class="danger c-remove">Heizkreis löschen</button></div>';
+  body.querySelector('.c-mixing').value=c.mixing||'';body.querySelector('.c-type').value=c.emitter_type||'';
+  body.querySelector('.c-name').addEventListener('input',ev=>title.textContent=ev.target.value);
+  card._pickers={};
+  for(const k of ['flow','flow_target','return','pump'])card._pickers[k]=single(body.querySelector('.c-e-'+k),k==='pump'?'status':'temp',c.entities[k]||'',markPlantDirty);
+  const points=body.querySelector('.c-points'),params=body.querySelector('.c-params');
+  for(const p of hc.points)pairRow(points,showNum(p.outdoor_c),showNum(p.flow_c),['Außentemperatur °C','Vorlauf °C',1,1]);
+  for(const [k,v] of Object.entries(hc.manufacturer_params))pairRow(params,k,typeof v==='number'?showNum(v):v,['Parameter','Wert',0,0]);
+  body.querySelector('.c-add-point').addEventListener('click',()=>{pairRow(points,'','',['Außentemperatur °C','Vorlauf °C',1,1]);markPlantDirty()});
+  body.querySelector('.c-add-param').addEventListener('click',()=>{pairRow(params,'','',['Parameter','Wert',0,0]);markPlantDirty()});
+  body.querySelector('.c-remove').addEventListener('click',()=>removeCircuit(c.id));
+  return card;
+}
+function drawCircuits(){const root=el('circuit-list');root.replaceChildren();plantDraft.circuits.forEach(c=>root.append(circuitCard(c)))}
+el('add-circuit').addEventListener('click',()=>{
+  plantDraft.circuits=collectCircuits(true);
+  if(plantDraft.circuits.length>=20)return notice('Maximal 20 Heizkreise.',true);
+  let n=plantDraft.circuits.length+1;while(plantDraft.circuits.some(c=>c.id==='hk'+n))n++;
+  plantDraft.circuits.push({id:'hk'+n,name:'Heizkreis '+n,mixing:null,emitter_type:null,design_flow_c:null,design_return_c:null,
+    heating_curve:{points:[],manufacturer_params:{},note:'',reference:''},entities:{flow:'',flow_target:'',return:'',pump:''}});
+  drawCircuits();markPlantDirty();
+  const cards=el('circuit-list').querySelectorAll('details.circuit');cards[cards.length-1].open=true;
+});
+function removeCircuit(id){
+  const used=cfg.emitters.filter(e=>e.circuit_id===id).length;
+  if(used)return notice('Der Heizkreis versorgt noch '+used+' Heizfläche'+(used>1?'n':'')+'. Bitte diese vor dem Löschen einem anderen Heizkreis zuordnen.',true);
+  plantDraft.circuits=collectCircuits(true);
+  if(plantDraft.circuits.length<=1)return notice('Mindestens ein Heizkreis wird benötigt.',true);
+  plantDraft.circuits=plantDraft.circuits.filter(c=>c.id!==id);drawCircuits();markPlantDirty();
+  notice('Heizkreis entfernt. Wirksam erst mit „Anlage speichern“.');
+}
+function collectCircuits(lenient=false,errors=[]){
+  return [...el('circuit-list').querySelectorAll('details.circuit')].map(card=>{
+    const q=s=>card.querySelector(s),name=q('.c-name').value.trim();
+    const n=(v,label)=>{const x=parseNum(v);if(Number.isNaN(x)){if(!lenient)errors.push((name||'Heizkreis')+' – '+label+': keine gültige Zahl.');return null}return x};
+    const points=[...q('.c-points').querySelectorAll('.pair-row')].map(r=>({outdoor_c:n(r.querySelector('.p-a').value,'Heizkurve Außentemperatur'),flow_c:n(r.querySelector('.p-b').value,'Heizkurve Vorlauf')}));
+    const params={};
+    for(const r of q('.c-params').querySelectorAll('.pair-row')){const k=r.querySelector('.p-a').value.trim(),raw=r.querySelector('.p-b').value.trim();if(!k&&!raw)continue;const num=parseNum(raw);params[k]=(num!==null&&!Number.isNaN(num))?num:raw}
+    return {id:card.dataset.id,name,mixing:q('.c-mixing').value||null,emitter_type:q('.c-type').value||null,
+      design_flow_c:n(q('.c-flow').value,'Auslegungsvorlauf'),design_return_c:n(q('.c-return').value,'Auslegungsrücklauf'),
+      heating_curve:{points,manufacturer_params:params,note:q('.c-curve-note').value.trim(),reference:q('.c-curve-ref').value.trim()},
+      entities:Object.fromEntries(Object.entries(card._pickers).map(([k,f])=>[k,f()]))};
+  });
+}
+el('reset-plant').addEventListener('click',()=>{if(plantDirty&&!confirm('Änderungen verwerfen?'))return;showPlant()});
+el('plant-form').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const errors=[],circuits=collectCircuits(false,errors);
+  for(const c of circuits){
+    const label=c.name||'Heizkreis';
+    if(!c.name)errors.push('Bitte jedem Heizkreis einen Namen geben.');
+    if((c.design_flow_c===null)!==(c.design_return_c===null))errors.push(label+': Auslegungsvorlauf und -rücklauf bitte gemeinsam angeben.');
+    else if(c.design_flow_c!==null&&c.design_flow_c<=c.design_return_c)errors.push(label+': Die Vorlauftemperatur muss höher sein als die Rücklauftemperatur.');
+    const pts=c.heating_curve.points;
+    if(pts.some(p=>p.outdoor_c===null||p.flow_c===null))errors.push(label+': Bitte jeden Heizkurvenpunkt vollständig ausfüllen oder entfernen.');
+    else if(pts.length===1)errors.push(label+': Heizkurve benötigt mindestens zwei Punkte. Andernfalls alle Punkte entfernen.');
+    else if(new Set(pts.map(p=>p.outdoor_c)).size!==pts.length)errors.push(label+': Diese Außentemperatur ist bereits als Heizkurvenpunkt vorhanden.');
+    if(Object.keys(c.heating_curve.manufacturer_params).some(k=>!k))errors.push(label+': Herstellerparameter benötigen einen Namen.');
+  }
+  const b=clone(plantDraft.building);
+  b.name=el('b-name').value.trim();b.heating_system=el('b-system').value||null;
+  b.design_outdoor_c=readNum('#b-outdoor','Norm-Außentemperatur',errors);b.design_outdoor_reference=el('b-outdoor-ref').value.trim();
+  b.heat_pump={...b.heat_pump,manufacturer:el('hp-manufacturer').value.trim(),model:el('hp-model').value.trim(),
+    nominal_power_kw:readNum('#hp-power','Nennheizleistung',errors),min_flow_l_h:readNum('#hp-minflow','Mindestvolumenstrom',errors),min_flow_reference:el('hp-minflow-ref').value.trim()};
+  if(b.heat_pump.min_flow_l_h!==null&&!b.heat_pump.min_flow_reference)errors.push('Mindestvolumenstrom bitte nur mit Quelle angeben (z. B. Herstellerunterlage).');
+  b.entities={outdoor:plantPickers.outdoor(),compressor:plantPickers.compressor(),dhw:plantPickers.dhw()};
+  if(errors.length)return notice(errors.join(' '),true);
+  const next=clone(cfg);next.building=b;next.circuits=circuits;
+  const ids=new Set(circuits.map(c=>c.id));
+  for(const r of next.rooms)if(r.default_circuit_id&&!ids.has(r.default_circuit_id))r.default_circuit_id=null;
+  try{await saveConfig(next);plantDirty=false;notice('Konfiguration gespeichert.');showPlant()}catch(ex){notice('Nicht gespeichert: '+ex.message,true)}
+});
+
+/* ---------- 4 Heizflächen-Übersicht ---------- */
+function showEmitterOverview(){
+  const root=el('emitter-overview');root.replaceChildren();
+  if(!cfg.emitters.length){const p=document.createElement('p');p.textContent='Noch keine Heizflächen erfasst. Heizflächen werden im Raum angelegt.';root.append(p)}
+  for(const room of cfg.rooms){
+    const list=cfg.emitters.filter(e=>e.room_id===room.id);if(!list.length)continue;
+    const h=document.createElement('h3');h.textContent=room.name;root.append(h);
+    for(const e of list){
+      const item=document.createElement('div');item.className='item row';
+      const info=document.createElement('div'),b=document.createElement('b');b.textContent=e.name;
+      const sub=document.createElement('div');sub.className='subtitle';sub.textContent=(TYPES[e.type]||'Typ offen')+' · '+circuitName(e.circuit_id)+(e.load_share_percent!==null?' · '+showNum(e.load_share_percent)+' %':'');
+      info.append(b,sub);
+      const btn=document.createElement('button');btn.textContent='Raum / Heizfläche bearbeiten';btn.addEventListener('click',()=>openRoom(room.id,e.id));
+      item.append(info,btn);root.append(item);
+    }
+  }
+}
+
+/* ---------- 5 Prüfen & Messung ---------- */
+function goToBlocker(b){
+  if(b.section==='building'){if(tab('plant'))el('sec-building').scrollIntoView({block:'start'});return}
+  if(b.section==='circuit'){if(tab('plant')){const card=document.querySelector('#circuit-list details[data-id="'+CSS.escape(b.circuit_id)+'"]');if(card){card.open=true;card.scrollIntoView({block:'start'})}}return}
+  openRoom(b.room_id,b.emitter_id||null,b.section==='heat_load'?'sec-heat-load':'sec-emitters');
+}
+async function showCheck(){
+  await loadReadiness();
+  const m=el('measure-list');m.replaceChildren();
+  if(!cfg.rooms.length){const p=document.createElement('p');p.textContent='Noch keine Räume angelegt.';m.append(p)}
+  for(const r of cfg.rooms){const item=document.createElement('div');item.className='item row';const n=document.createElement('span');n.textContent=r.name;
+    item.append(n,r.temperature_sensors.length?badge('Messbereit','good'):badge('Temperatursensor fehlt','bad'));m.append(item)}
+  const root=el('readiness-list');root.replaceChildren();
+  if(!readinessData){root.textContent='Prüfung derzeit nicht abrufbar.';return}
+  const section=(title,blockers,ok)=>{
+    const box=document.createElement('div');box.className='item';
+    const h=document.createElement('b');h.textContent=title;box.append(h,document.createTextNode(' '));
+    if(!blockers.length){box.append(badge(ok,'good'));root.append(box);return}
+    box.append(badge('Angaben für Abgleich fehlen','warn'));
+    for(const b of blockers){const btn=document.createElement('button');btn.className='blocker-link';btn.textContent='→ '+b.text;btn.addEventListener('click',()=>goToBlocker(b));box.append(btn)}
+    root.append(box);
+  };
+  section('Anlage',readinessData.building,'Angaben vollständig');
+  for(const r of cfg.rooms){const d=readinessData.rooms[r.id];if(d)section(r.name,d.blockers,'Auslegungsdaten vollständig – Berechnung noch nicht verfügbar')}
+  await latest();
+}
+
+/* ---------- measurement status (unchanged behaviour from v0.1.2) ---------- */
+function dateText(value){if(!value)return 'Noch nicht vorhanden';const p=new Date(value);return Number.isNaN(p.getTime())?'Zeitpunkt unbekannt':p.toLocaleString('de-DE')}
 function acquisitionStatus(a){
   let text='Warte auf erste Messung.',kind='';
   if(a.error==='not_configured')text='Messung pausiert: Noch keine Entitäten zugeordnet.';
@@ -132,51 +684,42 @@ function acquisitionStatus(a){
   else if(a.stale&&a.last_success){text='Messung veraltet: Seit mehr als 30 Minuten keine erfolgreiche Abfrage.';kind='error'}
   else if(a.connected===true){text='Home Assistant erreichbar. Datenqualität je Messwert prüfen.';kind='ok'}
   text+=' Letzter Versuch: '+dateText(a.last_attempt)+'. Letzte erfolgreiche Abfrage: '+dateText(a.last_success)+'.';
-  const root=el('acquisition-status');
-  if(root.textContent!==text)root.textContent=text;
-  root.className='alert '+kind;
+  const root=el('acquisition-status');if(root.textContent!==text)root.textContent=text;root.className='alert '+kind;
 }
-function acquisitionUnavailable(){
-  const root=el('acquisition-status');
-  root.textContent='Messstatus nicht abrufbar. Sichtbare Werte können veraltet sein.';
-  root.className='alert error';
-}
+function acquisitionUnavailable(){const root=el('acquisition-status');root.textContent='Messstatus nicht abrufbar. Sichtbare Werte können veraltet sein.';root.className='alert error'}
 const qualityLabels={ok:'Gültig',unavailable:'Nicht verfügbar',unknown:'Zustand unbekannt',invalid_number:'Kein gültiger Zahlenwert',invalid_state:'Ungültiger Kontaktzustand',invalid_unit:'Ungeeignete Einheit',implausible:'Außerhalb des plausiblen Bereichs',missing_timestamp:'Aktualität unbekannt: Zeitstempel fehlt',future_timestamp:'Zeitstempel liegt in der Zukunft',stale:'Veraltet',unchecked:'Historischer Wert: Qualität ungeprüft'};
 function sampleHTML(x){
-  const quality=x.quality||'unchecked';
-  let label=qualityLabels[quality]||'Qualität unbekannt';
+  const quality=x.quality||'unchecked';let label=qualityLabels[quality]||'Qualität unbekannt';
   if(x.stale&&quality!=='stale')label+=' · Veraltet';
-  const valid=Boolean(x.valid)&&quality==='ok'&&!x.stale;
-  const value=x.normalized_value!==null&&x.normalized_value!==undefined
-    ?safe(Number(x.normalized_value).toLocaleString('de-DE',{maximumFractionDigits:2}))+' '+safe(x.normalized_unit)
-    :safe(x.state)+' '+safe(x.unit);
-  const raw=x.normalized_value!==null&&x.normalized_value!==undefined
-    ?'<div class="hint">Originalwert: '+safe(x.state)+' '+safe(x.unit)+'</div>':'';
+  const valid=Boolean(x.valid)&&quality==='ok'&&!x.stale,hasN=x.normalized_value!==null&&x.normalized_value!==undefined;
+  const value=hasN?safe(Number(x.normalized_value).toLocaleString('de-DE',{maximumFractionDigits:2}))+' '+safe(x.normalized_unit):safe(x.state)+' '+safe(x.unit);
+  const raw=hasN?'<div class="hint">Originalwert: '+safe(x.state)+' '+safe(x.unit)+'</div>':'';
   return '<div class="item"><b>'+safe(x.entity_id)+'</b><div>'+value+'</div>'+raw+'<div class="tag '+(valid?'ok':'error')+'">'+safe(label)+'</div><div class="hint">Erfasst: '+safe(dateText(x.at))+' · HA-Meldung: '+safe(dateText(x.source_at))+'</div></div>';
 }
 async function stats(){
-  try{
-    const m=await api('overview');
-    acquisitionStatus(m.acquisition||{});
+  try{const m=await api('overview');acquisitionStatus(m.acquisition||{});
     el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)]].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
   }catch(ex){acquisitionUnavailable()}
 }
 async function latest(){
-  try{
-    const d=await api('latest');
-    if(d.acquisition)acquisitionStatus(d.acquisition);
+  try{const d=await api('latest');if(d.acquisition)acquisitionStatus(d.acquisition);
     el('sample-list').innerHTML=d.observations.length?d.observations.map(sampleHTML).join(''):'<p>Noch keine Messungen für die zugeordneten Entitäten gespeichert.</p>';
-  }catch(ex){
-    el('sample-list').textContent='Messwerte derzeit nicht abrufbar. Bitte erneut aktualisieren.';
-    acquisitionUnavailable();
-  }
+  }catch(ex){el('sample-list').textContent='Messwerte derzeit nicht abrufbar. Bitte erneut aktualisieren.';acquisitionUnavailable()}
 }
-async function boot(){try{cfg=await api('config');try{let d=await api('entities');entities=d.entities;notice(entities.length+' Home-Assistant-Entitäten geladen. Read-only.')}catch(ex){notice('HA-Entitäten derzeit nicht verfügbar: '+ex.message,true)}}catch(ex){notice(ex.message,true)}await stats()}boot();
-async function refreshMeasurements(){
-  if(document.hidden)return;
+el('refresh-samples').addEventListener('click',latest);
+
+async function boot(){
+  try{
+    cfg=await api('v2/config');saved=clone(cfg);
+    try{catalog=(await api('v2/catalog')).valves}catch(_){catalog=[]}
+    await loadReadiness();
+    try{const d=await api('entities');entities=d.entities;notice(entities.length+' Home-Assistant-Entitäten geladen. Read-only.')}
+    catch(ex){notice('HA-Entitäten derzeit nicht verfügbar: '+ex.message+' Bestehende Zuordnungen bleiben erhalten.',true)}
+  }catch(ex){notice('Konfiguration nicht ladbar: '+ex.message,true)}
   await stats();
-  if(!el('samples').classList.contains('hidden'))await latest();
 }
+boot();
+async function refreshMeasurements(){if(document.hidden)return;await stats();if(!el('check').classList.contains('hidden'))await latest()}
 setInterval(refreshMeasurements,30000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshMeasurements()});
 </script></body></html>

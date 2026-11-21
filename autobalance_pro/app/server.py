@@ -273,7 +273,11 @@ class API(BaseHTTPRequestHandler):
         if path=="/health":return self.send_json(200,{"ok":True,"read_only":True,"version":VERSION,"schema_version":model.SCHEMA_VERSION})
         if path=="/api/config":return self.send_json(200,load())
         if path=="/api/v2/config":return self.send_json(200,load_v2())
-        if path=="/api/v2/readiness":return self.send_json(200,{"calculation_blockers":model.calculation_blockers(load_v2()),"note":"Keine Berechnung implementiert; reine Datenvollständigkeit."})
+        if path=="/api/v2/readiness":
+            cfg=load_v2();result=model.readiness(cfg)
+            result["calculation_blockers"]=model.calculation_blockers(cfg)  # AB-008 format, kept for compatibility
+            return self.send_json(200,result)
+        if path=="/api/v2/catalog":return self.send_json(200,{"valves":model.VALVE_CATALOG})
         if path=="/api/entities":
             try:return self.send_json(200,{"connected":True,"entities":get_entities()})
             except Exception:return self.send_json(503,{"connected":False,"entities":[],"error":"Home Assistant derzeit nicht erreichbar"})
@@ -285,12 +289,17 @@ class API(BaseHTTPRequestHandler):
         return self.send_json(404,{"error":"Nicht gefunden"})
     def do_POST(self):
         path=urlsplit(self.path).path
-        if path not in ("/api/config","/api/v2/config"):return self.send_json(404,{"error":"Nicht gefunden"})
+        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion"):return self.send_json(404,{"error":"Nicht gefunden"})
         limit=100000 if path=="/api/config" else 500000
         try:
             size=int(self.headers.get("Content-Length","0"))
             if not 1<=size<=limit:return self.send_json(413,{"error":"Ungültige Datenlänge"})
             data=json.loads(self.rfile.read(size))
+            if path=="/api/v2/load-share-suggestion":
+                # Works on the unsaved editor state; validates structure but stores nothing.
+                if not isinstance(data,dict) or not isinstance(data.get("room_id"),str):raise ValueError("room_id fehlt")
+                shares,reason=model.suggest_load_shares(model.validate_structure(data.get("config")),data["room_id"])
+                return self.send_json(200,{"shares":shares,"reason":reason})
             if path=="/api/config":save_v1(data)
             else:save_v2(data)
             return self.send_json(200,{"saved":True})
