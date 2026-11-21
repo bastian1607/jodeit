@@ -19,6 +19,32 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Unveröffentlichte Änderungen (Branch `feature/autobalance-AB-001-logo`)
+
+- AB-001: Original-Logo von Jodeit Systeme (`jodeit_evcc/jodeit-logo.png`, unverändert, SHA-256 `8e1593cf…7673`) im Header der Oberfläche und als `logo.png` für den HA App Store. Verwendung von Bastian am 21.11.2026 freigegeben. Keine Versionserhöhung; erst mit dem nächsten freigegebenen Release.
+- AB-008: Datenmodell v2 (Schemaversion 2) – Gebäude, mehrere hydraulische Heizkreise, Räume mit
+  dokumentierter Heizlast, thermische Zonen, einzelne Heizflächen mit Heizkreis, Referenzleistung,
+  Heizlastanteil und Ventilangaben. Details: [Outline AB-008](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt).
+  - **Heizlast wird nicht berechnet.** Nur `adopted` (Verfahren, Quelle, Datum Pflicht) oder `missing`.
+    Ohne Heizlast laufen Messung und Diagnose weiter, Empfehlungen bleiben gesperrt.
+  - Neue API: `GET/POST api/v2/config`, `GET api/v2/readiness` (fehlende Daten je Raum, keine Berechnung).
+    `api/config` (v1) bleibt für die bestehende Oberfläche erhalten; Speichern darüber verliert keine v2-Felder.
+  - Messwerte (`samples`) werden nicht verändert.
+
+### Datenbank-Umstellung, Sicherung und Rückweg (AB-008)
+
+- Beim ersten Start legt die App vor der Umstellung eine konsistente Sicherung über die SQLite-Backup-API an:
+  `/data/backups/autobalance-before-v1-to-v2-<Zeitstempel>.db`. Umstellung in einer Transaktion; schlägt sie
+  fehl, bleibt die alte Konfiguration unverändert und die App startet nicht (Supervisor-Log prüfen).
+- v2 liegt in der neuen Tabelle `config_v2`. Die alte Tabelle `config` wird bei jedem Speichern als
+  v1-Abbild mitgeschrieben. **Ein Downgrade auf v0.1.2 funktioniert daher ohne Wiederherstellung**
+  (v2-Zusatzfelder sind dort nur nicht sichtbar). Änderungen unter v0.1.2 werden beim nächsten Start der
+  neuen Version mit erneuter Sicherung übernommen.
+- Vollständiger Rückweg: App stoppen, gewünschte Sicherung aus `/data/backups/` als `/data/autobalance.db`
+  zurückkopieren (ggf. `-wal`/`-shm` entfernen), App starten – oder die HA-App-Sicherung wiederherstellen.
+- Eine Konfiguration mit unbekannter, neuerer Schemaversion wird nicht überschrieben; die App startet dann nicht.
+
+
 ## Änderungen in v0.1.2
 
 Dieser freigegebene Release ergänzt v0.1.1. Manifest und Laufzeitversion sind 0.1.2.

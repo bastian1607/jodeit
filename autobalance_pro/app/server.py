@@ -1,6 +1,7 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
 import json,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
+import model
 from datetime import datetime,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -29,11 +30,82 @@ def setup():
         for name,kind in (("source_at","TEXT"),("quality","TEXT"),("normalized_value","REAL"),("normalized_unit","TEXT")):
             if name not in columns:c.execute(f"ALTER TABLE samples ADD COLUMN {name} {kind}")
         c.execute("CREATE TABLE IF NOT EXISTS acquisition (id INTEGER PRIMARY KEY CHECK(id=1), last_attempt TEXT, last_success TEXT, connected INTEGER, error TEXT)")
+        # AB-008: schema v2 lives in its own table. The legacy `config` row is kept as a v1
+        # projection so a downgrade to v0.1.x still finds a readable configuration.
+        c.execute("CREATE TABLE IF NOT EXISTS config_v2 (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL, value TEXT NOT NULL, v1_mirror TEXT NOT NULL, updated_at TEXT NOT NULL)")
+        c.execute("CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, kind TEXT NOT NULL, applied_at TEXT NOT NULL, backup_path TEXT)")
+    sync_config()
+
+def backup_database(reason):
+    """Consistent copy via the SQLite backup API (safe with WAL), stored next to the DB."""
+    folder=Path(DB).parent/"backups"
+    folder.mkdir(parents=True,exist_ok=True)
+    target=folder/f"autobalance-{reason}-{utcnow().strftime('%Y%m%dT%H%M%S%fZ')}.db"
+    source=sqlite3.connect(DB,timeout=10)
+    try:
+        destination=sqlite3.connect(str(target))
+        try:source.backup(destination)
+        finally:destination.close()
+    finally:source.close()
+    logging.info("Datenbanksicherung erstellt: %s",target)
+    return str(target)
+
+def _write_config(c,cfg):
+    mirror=json.dumps(model.to_v1(cfg),ensure_ascii=False,sort_keys=True)
+    c.execute("INSERT INTO config_v2(id,schema_version,value,v1_mirror,updated_at) VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET schema_version=excluded.schema_version,value=excluded.value,v1_mirror=excluded.v1_mirror,updated_at=excluded.updated_at",(model.SCHEMA_VERSION,json.dumps(cfg,ensure_ascii=False),mirror,utcnow().isoformat()))
+    c.execute("INSERT INTO config(id,value) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",(mirror,))
+
+def sync_config():
+    """Create or update schema v2 from the legacy row. Runs at start-up only.
+
+    * no v2 yet, legacy row present -> backup, convert v1 -> v2 (first start of v0.2)
+    * legacy row changed since the last mirror (e.g. after a temporary downgrade) -> backup, merge
+    * fresh install -> empty v2 without backup
+    Conversion is lenient: legacy data is preserved, strict validation applies on save.
+    """
+    with LOCK:
+        with connect() as c:
+            legacy=c.execute("SELECT value FROM config WHERE id=1").fetchone()
+            current=c.execute("SELECT schema_version,value,v1_mirror FROM config_v2 WHERE id=1").fetchone()
+        if current and current[0]!=model.SCHEMA_VERSION:
+            raise RuntimeError(f"Unbekannte Schemaversion {current[0]} – neuere App-Version erforderlich")
+        if current and (legacy is None or legacy[0]==current[2]):return
+        if current is None and legacy is None:
+            with connect() as c:_write_config(c,model.empty())
+            return
+        legacy_cfg=json.loads(legacy[0]) if legacy else {}
+        if current is None:
+            kind="v1_to_v2";cfg=model.from_v1(legacy_cfg)
+        else:
+            kind="legacy_merge";cfg=model.merge_v1(json.loads(current[1]),legacy_cfg)
+        path=backup_database("before-"+kind.replace("_","-"))
+        with connect() as c:
+            _write_config(c,cfg)
+            c.execute("INSERT INTO schema_migrations(version,kind,applied_at,backup_path) VALUES(?,?,?,?)",(model.SCHEMA_VERSION,kind,utcnow().isoformat(),path))
+        logging.info("Konfiguration auf Schema %s gebracht (%s)",model.SCHEMA_VERSION,kind)
 def empty():
     return {"rooms":[],"zones":[],"heating":{"manufacturer":"","model":"","circuit_name":"Heizkreis 1","outdoor":"","flow":"","return":"","compressor":"","dhw":""}}
+def load_v2():
+    with connect() as c:r=c.execute("SELECT value FROM config_v2 WHERE id=1").fetchone()
+    return json.loads(r[0]) if r else model.empty()
 def load():
-    with connect() as c:r=c.execute("SELECT value FROM config WHERE id=1").fetchone()
-    return json.loads(r[0]) if r else empty()
+    """Legacy v1 view used by the current UI (`GET /api/config`)."""
+    return model.to_v1(load_v2())
+def _as_v2(d):
+    return d if isinstance(d,dict) and "schema_version" in d else model.from_v1(d)
+def save_v2(cfg):
+    cfg=model.validate(cfg)
+    with LOCK:
+        previous=load_v2()
+        with connect() as c:
+            _write_config(c,cfg)
+            if wanted(previous)!=wanted(cfg) or temperature_ids(previous)!=temperature_ids(cfg):
+                c.execute("DELETE FROM acquisition")
+    return cfg
+def save_v1(data):
+    """Save from the legacy UI: v1 rules first, then merge into v2 without losing v2-only fields."""
+    validate(data)
+    with LOCK:return save_v2(model.merge_v1(load_v2(),data))
 def entity_id(value,domains,optional=False):
     if optional and value in (None,""):return
     if not isinstance(value,str) or len(value)>200 or not ENTITY_PATTERN.fullmatch(value) or value.split(".",1)[0] not in domains:
@@ -83,15 +155,7 @@ def get_entities():
     if not isinstance(items,list):raise RuntimeError("Home Assistant lieferte keine Entitätenliste")
     return [{"entity_id":e.get("entity_id",""),"name":e.get("attributes",{}).get("friendly_name",e.get("entity_id","")),"state":e.get("state",""),"unit":e.get("attributes",{}).get("unit_of_measurement",""),"device_class":e.get("attributes",{}).get("device_class",""),"source_at":e.get("last_reported") or e.get("last_updated")} for e in items if isinstance(e,dict)]
 def wanted(d):
-    ids=set()
-    for r in d["rooms"]:
-        ids.update(r.get("temperature_sensors",[]))
-        ids.update(r.get("window_sensors",[]))
-        ids.update(v["entity"] for v in r.get("radiators",[]) if v.get("entity"))
-    ids.update(d["heating"].get(key,"") for key in ("outdoor","flow","return","compressor","dhw"))
-    ids.discard("")
-    ids.discard(None)
-    return ids
+    return model.entities_of(_as_v2(d))
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -103,7 +167,7 @@ def age_seconds(timestamp,now=None):
     except (AttributeError,TypeError,ValueError):return None
 
 def temperature_ids(d):
-    return {v for r in d["rooms"] for v in r["temperature_sensors"]} | {d["heating"].get(k) for k in ("outdoor","flow","return")} - {None,""}
+    return model.temperature_entities_of(_as_v2(d))
 
 def quality(e,is_temperature,now):
     value=e.get("state","unavailable")
@@ -127,7 +191,7 @@ def quality(e,is_temperature,now):
     return "ok",normalized,unit
 
 def acquisition_status(now=None):
-    if not wanted(load()):return {"last_attempt":None,"last_success":None,"connected":None,"error":"not_configured","stale":True}
+    if not wanted(load_v2()):return {"last_attempt":None,"last_success":None,"connected":None,"error":"not_configured","stale":True}
     with connect() as c:row=c.execute("SELECT last_attempt,last_success,connected,error FROM acquisition WHERE id=1").fetchone()
     if not row:return {"last_attempt":None,"last_success":None,"connected":None,"error":None,"stale":True}
     attempt,success,connected,error=row
@@ -136,7 +200,7 @@ def acquisition_status(now=None):
 
 def sample():
     with LOCK:
-        d=load()
+        d=load_v2()
         desired=wanted(d)
         now=utcnow()
         at=now.isoformat()
@@ -160,7 +224,7 @@ def sample():
 
 def latest_observations(now=None):
     now=now or utcnow()
-    desired=wanted(load())
+    desired=wanted(load_v2())
     with connect() as c:rows=c.execute("SELECT entity_id,state,unit,valid,at,source_at,quality,normalized_value,normalized_unit FROM samples WHERE id IN (SELECT MAX(id) FROM samples GROUP BY entity_id) ORDER BY entity_id").fetchall()
     observations=[]
     for row in rows:
@@ -198,31 +262,39 @@ class API(BaseHTTPRequestHandler):
             self.send_header("Content-Length",str(len(body)))
             self.end_headers()
             return self.wfile.write(body)
-        if path=="/health":return self.send_json(200,{"ok":True,"read_only":True,"version":VERSION})
+        if path=="/jodeit-logo.png":
+            body=(ROOT/"static"/"jodeit-logo.png").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type","image/png")
+            self.send_header("Cache-Control","max-age=86400")
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
+        if path=="/health":return self.send_json(200,{"ok":True,"read_only":True,"version":VERSION,"schema_version":model.SCHEMA_VERSION})
         if path=="/api/config":return self.send_json(200,load())
+        if path=="/api/v2/config":return self.send_json(200,load_v2())
+        if path=="/api/v2/readiness":return self.send_json(200,{"calculation_blockers":model.calculation_blockers(load_v2()),"note":"Keine Berechnung implementiert; reine Datenvollständigkeit."})
         if path=="/api/entities":
             try:return self.send_json(200,{"connected":True,"entities":get_entities()})
             except Exception:return self.send_json(503,{"connected":False,"entities":[],"error":"Home Assistant derzeit nicht erreichbar"})
         if path=="/api/overview":
             with connect() as c:row=c.execute("SELECT COUNT(*),MAX(at) FROM samples").fetchone()
-            d=load()
+            d=load_v2()
             return self.send_json(200,{"rooms":len(d["rooms"]),"zones":len(d["zones"]),"samples":row[0],"last_sample":row[1],"version":VERSION,"acquisition":acquisition_status(),"last_sample_age_seconds":age_seconds(row[1])})
         if path=="/api/latest":return self.send_json(200,{"observations":latest_observations(),"acquisition":acquisition_status()})
         return self.send_json(404,{"error":"Nicht gefunden"})
     def do_POST(self):
-        if urlsplit(self.path).path!="/api/config":return self.send_json(404,{"error":"Nicht gefunden"})
+        path=urlsplit(self.path).path
+        if path not in ("/api/config","/api/v2/config"):return self.send_json(404,{"error":"Nicht gefunden"})
+        limit=100000 if path=="/api/config" else 500000
         try:
             size=int(self.headers.get("Content-Length","0"))
-            if not 1<=size<=100000:return self.send_json(413,{"error":"Ungültige Datenlänge"})
-            data=validate(json.loads(self.rfile.read(size)))
-            with LOCK:
-                with connect() as c:
-                    previous=load()
-                    c.execute("INSERT INTO config(id,value) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",(json.dumps(data,ensure_ascii=False),))
-                    if wanted(previous)!=wanted(data) or temperature_ids(previous)!=temperature_ids(data):
-                        c.execute("DELETE FROM acquisition")
+            if not 1<=size<=limit:return self.send_json(413,{"error":"Ungültige Datenlänge"})
+            data=json.loads(self.rfile.read(size))
+            if path=="/api/config":save_v1(data)
+            else:save_v2(data)
             return self.send_json(200,{"saved":True})
-        except (ValueError,TypeError,KeyError,OverflowError) as exc:return self.send_json(400,{"error":str(exc)})
+        except (ValueError,TypeError,KeyError,OverflowError,AttributeError) as exc:return self.send_json(400,{"error":str(exc)})
 if __name__=="__main__":
     setup()
     threading.Thread(target=loop,daemon=True).start()

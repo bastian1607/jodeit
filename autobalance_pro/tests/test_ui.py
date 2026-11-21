@@ -95,6 +95,9 @@ class BrowserTests(unittest.TestCase):
         server.sample()
         self.page.goto(self.url)
         expect(self.page.locator('header small')).to_contain_text('v' + server.VERSION)
+        logo = self.page.get_by_role('img', name='Jodeit Systeme')
+        expect(logo).to_be_visible()
+        self.assertGreater(logo.evaluate('img => img.naturalWidth'), 0)
         expect(self.page.locator('#acquisition-status')).to_contain_text('Home Assistant erreichbar')
         self.page.get_by_role('button', name='4 Messwerte').click()
         expect(self.page.locator('#sample-list')).to_contain_text('20 °C')
@@ -125,6 +128,7 @@ class BrowserTests(unittest.TestCase):
         cfg['rooms'][0]['id'] = "');window.__legacyInjected=true;//"
         with server.connect() as connection:
             connection.execute('UPDATE config SET value=? WHERE id=1', (json.dumps(cfg),))
+        server.setup()  # simulate legacy data present at start-up (lenient v1 -> v2 merge)
         self.page.goto(self.url)
         self.page.get_by_role('button', name='1 Räume').click()
         self.page.get_by_role('button', name='Bearbeiten', exact=True).click()
