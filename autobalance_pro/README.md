@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.1.2
+# Jodeit AutoBalance Pro v0.2.0
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -19,9 +19,11 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
-## Unveröffentlichte Änderungen (Branch `feature/autobalance-AB-001-logo`)
+## Änderungen in v0.2.0 (freigegeben 21.11.2026)
 
-- AB-001: Original-Logo von Jodeit Systeme (`jodeit_evcc/jodeit-logo.png`, unverändert, SHA-256 `8e1593cf…7673`) im Header der Oberfläche und als `logo.png` für den HA App Store. Verwendung von Bastian am 21.11.2026 freigegeben. Keine Versionserhöhung; erst mit dem nächsten freigegebenen Release.
+Enthält AB-001 (Logo), AB-008 (Datenmodell v2 mit Migration) und AB-009 (Oberfläche v2). Weiterhin rein lesend; keine Heizlastberechnung, keine hydraulische Empfehlung.
+
+- AB-001: Original-Logo von Jodeit Systeme (`jodeit_evcc/jodeit-logo.png`, unverändert, SHA-256 `8e1593cf…7673`) im Header der Oberfläche und als `logo.png` für den HA App Store. Verwendung von Bastian am 21.11.2026 freigegeben.
 - AB-008: Datenmodell v2 (Schemaversion 2) – Gebäude, mehrere hydraulische Heizkreise, Räume mit
   dokumentierter Heizlast, thermische Zonen, einzelne Heizflächen mit Heizkreis, Referenzleistung,
   Heizlastanteil und Ventilangaben. Details: [Outline AB-008](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt).

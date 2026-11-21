@@ -1,51 +1,27 @@
 # AutoBalance Pro – überprüfter Projektstatus
 **Stichtag: 21.11.2026** · Dokumentationssnapshot, keine neue Funktionsfreigabe.
 
-## Quellen und Repositories
+## Quellen
 
 - Code: [bastian1607/jodeit – autobalance_pro](https://github.com/bastian1607/jodeit/tree/main/autobalance_pro), maßgeblich ist `main`.
-- Fachkonzept: [Outline · AutoBalance Pro](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD).
-- Rückmeldungen: [Outline · Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS).
-- Prozess: [Outline · KI-Zusammenarbeit](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM); Kurzregeln: [CLAUDE.md](CLAUDE.md).
+- Outline: [Pilotplanung](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD) · [Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS) · [AB-008 Datenmodell v2](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt) · [AB-009 Oberfläche](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-009-ubergabe-an-chatgpt-oberflache-fur-datenmodell-v2-wF0mbKy2cy) · [Zusammenarbeit](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM); Kurzregeln: [CLAUDE.md](CLAUDE.md).
 
-## Nachweisbarer Entwicklungsstand
+## Stand v0.2.0 (Release freigegeben von Bastian am 21.11.2026)
 
-- Aktuelle **Manifest- und Runtime-Version: v0.1.2** (GitHub-Dateien `config.yaml` und `app/version.py` am 21.11.2026 gelesen).
-- Home-Assistant-App mit Ingress-Web-UI, Raumanlage und Solltemperatur, mehreren Raumtemperatur- und Fensterkontakt-Entitäten, mehreren Heizkörpern, thermischen Zonen, Wärmepumpen-Entitätszuordnung (einschließlich möglicher BBQKees-/EMS-ESP-Werte aus HA), lokaler SQLite-Persistenz und zyklischer rein lesender Erfassung.
-- v0.1.1: suchbare HA-Entitäts-Dropdowns, vorläufige dunkle UI-Farbgebung.
-- v0.1.2: gemeinsame Runtime-Version, Status/Datenqualität mit Temperatur-Plausibilität, °F→°C-Normalisierung, HA-Abfragefehleranzeige, Aktualitätsprüfung, additive SQLite-Migration.
-- Laut [Outline-Testnachweis](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS): PR #2 und #3 gemergt, **17 lokale Tests** zum damaligen Release bestanden. Dokumentierter HA-Rollout von 0.1.0 auf 0.1.2 mit lokaler App-Sicherung `92a4d2e2`; Supervisor-Start, /health, UI-Auslieferung, Konfigurationserhalt und erste reale lesende Messwerte geprüft. Diese Aussagen sind **historisch dokumentierte Testergebnisse**, keine neue Prüfung am 21.11.2026.
-- Ein vollständiger realer Browser-/Ingress-Bedientest, Langzeitbeobachtung sowie echte Heizungs-/Hydrauliktests sind **nicht bestätigt**.
-- Der Live-Betriebsstatus einer HA-Anlage wurde bei dieser Dokumentationsaktualisierung **nicht erneut aus Home Assistant gelesen**.
+- **Gemergt:** PR #5 (AB-008 Datenmodell v2, enthält AB-001 Logo) und PR #6 (AB-009 Oberfläche v2). Versionsfreigabe über eigenen Release-PR.
+- **Datenmodell v2:** Gebäude, Heizkreise (1–20), Räume, thermische Zonen, Heizflächen mit maßgeblichem Heizkreis. Raumheizlast nur „übernommen“ (Wert, Verfahren, Quelle, Datum) oder „fehlt“ – keine Schätzung. Umstellung beim ersten Start mit SQLite-Sicherung in `/data/backups/`; alte Tabelle bleibt als v1-Abbild für Downgrade erhalten.
+- **Oberfläche:** Räume → Zonen → Heizungsanlage & Heizkreise → Heizflächen → Prüfen & Messung; Ventile nur Hersteller/Serie; Anteilsvorschlag nur bei vergleichbaren Daten.
+- **Tests:** 69 lokale Tests (Backend, API, Migration, 18 Browsertests). Nicht lokal getestet: Docker-Build, ARM.
+- **HA-Rollout:** Ergebnis im Outline-Backlog dokumentiert (Abschnitt „Rollout v0.2.0“).
 
 ## Nicht umgesetzt / nicht freigegeben
 
-- Automatische Stellversuche und Ventilsteuerung.
-- Verlässliche hydraulische l/h-Berechnung aus Heizlast, Heizkörper- und Ventildaten.
-- Vollständige 30-Tage-Messanalyse, nächtliche Versuchsauswertung, Heizkurvenempfehlung und Abschlussbericht.
-- Nachgewiesene Kompatibilität NodOn-Positionierung ↔ konkretes Heimeier-Eclipse-Ventil.
-- Echte mehrkreisige Wärmepumpen-/FBH-Optimierung sowie Anlagen-Fail-safe.
+- Hydraulische Berechnung (l/h, Ventilvoreinstellung), Auswertung der 30-Tage-Messung, Heizkurvenempfehlung, Abschlussbericht.
+- Aktive Stellversuche und jede Ansteuerung von Ventilen oder Wärmepumpe.
+- FBH-Berechnung; geprüfter Ventilkatalog mit Varianten/Kennlinien; quadratisches App-Icon.
 
-## Offene UI- und Qualitätsthemen
+## Offene Fragen
 
-- AB-001: originales Jodeit-Logo; offizielle CI-Werte prüfen.
-- AB-002/003: v0.1.1 implementiert; noch ausstehende reale UI-/Ingress-/Mobil-Abnahme.
-- AB-004: Zusatzwünsche zurückgestellt.
-- AB-005–007: Status und Testnachweise im aktuellen Outline-Backlog maßgeblich; beim nächsten Auftrag frisch lesen.
+- Anteilsvorschlag: Exponent als Pflicht und Solltemperatur als Auslegungs-Raumtemperatur – fachliche Bestätigung offen (AB-009-Seite).
 
-## Vereinbarte Rollen ab 21.11.2026
-
-**ChatGPT:** UX/UI, Produktdesign, funktionale Anforderungen und fachliches Review.
-**Claude:** maßgeblicher Programmierpartner, Code-Änderungen, Tests und PRs.
-**Bastian/Jodeit:** Priorisierung, Freigabe, reale HA-/Anlagentests.
-**Outline:** führende Dokumentation; **GitHub:** führende Codebasis.
-**Codex:** optional unterstützend, keine parallele unkoordinierte Programmierung.
-
-## Nächste sinnvolle Schritte (noch keine Implementierungsfreigabe)
-
-1. Reale HA-Bedienung der v0.1.2 mit Raum-/Zonenverwaltung, Entitätensuche und Reconnect prüfen und Ergebnis im Backlog dokumentieren.
-2. ChatGPT gestaltet und spezifiziert offene UI-Fragen, insbesondere Jodeit-Logo/Design und verständliche Statusanzeigen.
-3. Claude setzt **freigegebene** Aufgaben isoliert in Branches mit Tests und PRs um.
-4. Erst nach Messqualität und abgesicherten technischen Nachweisen Entwicklungsauftrag für hydraulische Berechnung und aktive Stellversuche freigeben.
-
-**Quellenprüfung am 21.11.2026:** GitHub `config.yaml`, `app/version.py`, README, UI-/Backend-Dateien und Outline-Projekt-/Backlogseiten eingelesen. Die Angaben sind eine Momentaufnahme.
+**Quellenprüfung am 21.11.2026:** GitHub `main` und Outline-Seiten gelesen. Momentaufnahme.
