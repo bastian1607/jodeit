@@ -490,7 +490,12 @@ def _validate_emitter(emitter, room_ids, circuit_ids):
     _check_entity(emitter.get("actuator_entity"), {"number", "climate"}, "Stellantrieb")
 
 
-def validate(cfg):
+def validate_structure(cfg):
+    """Full validation except the per-room load-share completeness rule (for unsaved editor states)."""
+    return validate(cfg, check_shares=False)
+
+
+def validate(cfg, check_shares=True):
     """Strict validation of a complete schema-v2 configuration. Returns cfg or raises Invalid."""
     if not isinstance(cfg, dict) or cfg.get("schema_version") != SCHEMA_VERSION:
         _fail("Konfigurationsformat ungültig (Schemaversion 2 erwartet)")
@@ -519,7 +524,7 @@ def validate(cfg):
         if emitter["id"] in emitter_ids:
             _fail("Heizflächen-ID doppelt")
         emitter_ids.add(emitter["id"])
-    for room_id in room_ids:
+    for room_id in (room_ids if check_shares else ()):
         shares = [e.get("load_share_percent") for e in cfg["emitters"] if e["room_id"] == room_id]
         given = [s for s in shares if s is not None]
         if given and (len(given) != len(shares) or abs(sum(float(s) for s in given) - 100) > 0.5):
@@ -584,3 +589,106 @@ def calculation_blockers(cfg):
         if reasons:
             blockers[room["id"]] = reasons
     return blockers
+
+
+# ------------------------------------------------------------ AB-009 helpers
+
+# Only manufacturer/series without variants, flow ranges or characteristic curves
+# (decision Bastian 2026-11-21: no unverified product data in the catalogue).
+VALVE_CATALOG = [
+    {"key": "imi-heimeier-eclipse", "manufacturer": "IMI Heimeier", "series": "Eclipse"},
+]
+
+
+def _blocker(code, text, **target):
+    return {"code": code, "text": text, **target}
+
+
+def readiness(cfg):
+    """Data completeness per room and for the building – informational only.
+
+    No hydraulic calculation exists yet; an empty blocker list means
+    "Auslegungsdaten vollständig", never "Empfehlung verfügbar".
+    """
+    circuits = {c["id"]: c for c in cfg["circuits"]}
+    building = []
+    if cfg["building"].get("heating_system") is None:
+        building.append(_blocker("heating_system_missing", "Heizsystem der Anlage fehlt", section="building"))
+    if cfg["building"].get("design_outdoor_c") is None:
+        building.append(_blocker("design_outdoor_missing", "Norm-Außentemperatur fehlt", section="building"))
+    rooms = {}
+    for room in cfg["rooms"]:
+        blockers = []
+        if room["heat_load"].get("status") != "adopted":
+            blockers.append(_blocker("heat_load_missing", "Heizlast fehlt", room_id=room["id"], section="heat_load"))
+        emitters = [e for e in cfg["emitters"] if e["room_id"] == room["id"]]
+        if not emitters:
+            blockers.append(_blocker("no_emitter", "Keine Heizfläche erfasst", room_id=room["id"], section="emitters"))
+        for e in emitters:
+            if e.get("type") == "underfloor":
+                blockers.append(_blocker("underfloor_not_supported", f"{e['name']}: FBH-Berechnung noch nicht verfügbar",
+                                         room_id=room["id"], emitter_id=e["id"], section="emitter"))
+            elif e["rated_output"].get("value_w") is None or e["rated_output"].get("flow_c") is None:
+                blockers.append(_blocker("output_reference_missing", f"{e['name']}: Heizkörperleistung ohne Referenztemperaturen",
+                                         room_id=room["id"], emitter_id=e["id"], section="emitter"))
+        if len(emitters) > 1 and any(e.get("load_share_percent") is None for e in emitters):
+            blockers.append(_blocker("shares_missing", "Heizlastanteile der Heizflächen fehlen", room_id=room["id"], section="emitters"))
+        for circuit_id in sorted({e["circuit_id"] for e in emitters}):
+            circuit = circuits.get(circuit_id, {})
+            if circuit.get("design_flow_c") is None:
+                blockers.append(_blocker("circuit_design_missing", f"Auslegungstemperaturen fehlen: {circuit.get('name', circuit_id)}",
+                                         circuit_id=circuit_id, section="circuit"))
+        rooms[room["id"]] = {"measurement_ready": bool(room.get("temperature_sensors")), "blockers": blockers}
+    return {"building": building, "rooms": rooms,
+            "note": "Reine Datenvollständigkeit. Eine hydraulische Berechnung ist noch nicht implementiert."}
+
+
+def _lmtd(flow, ret, room):
+    if not flow > ret > room:
+        return None
+    return (flow - ret) / math.log((flow - room) / (ret - room))
+
+
+def suggest_load_shares(cfg, room_id):
+    """Proportional load-share proposal for the emitters of one room.
+
+    Outputs are converted to the circuit design temperatures (EN 442 relation
+    Q = Qn * (ΔT_design / ΔT_ref)^n) so they are comparable. Returns
+    (shares, None) or (None, reason). Nothing is saved; the user confirms.
+    """
+    room = next((r for r in cfg["rooms"] if r["id"] == room_id), None)
+    if room is None:
+        return None, "Raum nicht gefunden"
+    emitters = [e for e in cfg["emitters"] if e["room_id"] == room_id]
+    if not emitters:
+        return None, "Keine Heizfläche erfasst"
+    if len(emitters) == 1:
+        return {emitters[0]["id"]: 100.0}, None
+    circuits = {c["id"]: c for c in cfg["circuits"]}
+    design_room = room.get("target")
+    outputs = []
+    for e in emitters:
+        if e.get("type") == "underfloor":
+            return None, f"{e['name']}: FBH wird nicht mit dem Heizkörperverfahren verglichen"
+        out = e["rated_output"]
+        if out.get("value_w") is None or out.get("flow_c") is None:
+            return None, f"{e['name']}: Leistung mit vollständigen Referenztemperaturen fehlt"
+        if e.get("exponent") is None:
+            return None, f"{e['name']}: Heizkörperexponent fehlt"
+        circuit = circuits.get(e["circuit_id"], {})
+        if circuit.get("design_flow_c") is None:
+            return None, f"{circuit.get('name', e['circuit_id'])}: Auslegungstemperaturen fehlen"
+        ref = _lmtd(float(out["flow_c"]), float(out["return_c"]), float(out["room_c"]))
+        design = _lmtd(float(circuit["design_flow_c"]), float(circuit["design_return_c"]), float(design_room))
+        if ref is None or design is None:
+            return None, f"{e['name']}: Auslegungsrücklauf muss über der Raumtemperatur liegen"
+        outputs.append((e["id"], float(out["value_w"]) * (design / ref) ** float(e["exponent"])))
+    total = sum(q for _, q in outputs)
+    shares, assigned = {}, 0.0
+    for i, (emitter_id, q) in enumerate(outputs):
+        if i == len(outputs) - 1:
+            shares[emitter_id] = round(100.0 - assigned, 1)
+        else:
+            shares[emitter_id] = round(100.0 * q / total, 1)
+            assigned += shares[emitter_id]
+    return shares, None

@@ -99,7 +99,7 @@ class BrowserTests(unittest.TestCase):
         expect(logo).to_be_visible()
         self.assertGreater(logo.evaluate('img => img.naturalWidth'), 0)
         expect(self.page.locator('#acquisition-status')).to_contain_text('Home Assistant erreichbar')
-        self.page.get_by_role('button', name='4 Messwerte').click()
+        self.page.get_by_role('button', name='5 Prüfen & Messung').click()
         expect(self.page.locator('#sample-list')).to_contain_text('20 °C')
         expect(self.page.locator('#sample-list')).to_contain_text('Gültig')
         self.entities[0]['source_at'] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -154,6 +154,8 @@ class BrowserTests(unittest.TestCase):
         expect(picker.get_by_role('checkbox')).to_be_checked()
         search.fill('')
         expect(picker.get_by_role('checkbox', checked=True)).to_have_count(2)
+        self.page.locator('#sec-emitters > summary').click()  # AB-009: emitters live in collapsible cards
+        self.page.locator('details.emitter > summary').first.click()
         single = self.page.locator('.rad-entity')
         single.get_by_role('searchbox').fill('second')
         expect(single.get_by_role('combobox')).to_have_value('number.valve')

@@ -31,6 +31,14 @@
     `api/config` (v1) bleibt für die bestehende Oberfläche erhalten; Speichern darüber verliert keine v2-Felder.
   - Messwerte (`samples`) werden nicht verändert.
 
+- AB-009: Oberfläche für Datenmodell v2 nach freigegebenem ChatGPT-Design (Bastian, 21.11.2026).
+  Schritte **1 Räume → 2 Thermische Zonen → 3 Heizungsanlage & Heizkreise → 4 Heizflächen → 5 Prüfen & Messung**.
+  Raumheizlast nur „Fehlt“/„Übernommen“ (Wert, Verfahren, Quelle, Datum); Heizflächen als Karten im Raum mit
+  maßgeblichem Heizkreis, Referenzleistung, Heizlastanteil (Live-Summe, Vorschlag nur bei vergleichbaren Daten),
+  Ventil nur Hersteller/Serie (`IMI Heimeier · Eclipse`, „Anderes“, „Unbekannt“) ohne Kennlinien;
+  Heizkurve als Stützpunkte; Prüfseite mit Sprunglinks. Die Oberfläche speichert ausschließlich über `api/v2/config`.
+  Neue API: `GET api/v2/catalog`, `POST api/v2/load-share-suggestion` (speichert nichts), erweitertes `api/v2/readiness`.
+
 ### Datenbank-Umstellung, Sicherung und Rückweg (AB-008)
 
 - Beim ersten Start legt die App vor der Umstellung eine konsistente Sicherung über die SQLite-Backup-API an:
