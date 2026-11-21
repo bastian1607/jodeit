@@ -33,6 +33,7 @@ class QualityTests(unittest.TestCase):
     def save(self):
         with server.connect() as c:
             c.execute('INSERT OR REPLACE INTO config VALUES(1,?)', (json.dumps(self.config),))
+        server.setup()  # legacy row written directly: start-up sync merges it into schema v2
     def entity(self, **kw):
         e = {'entity_id':'sensor.room','state':'68','unit':'°F','source_at':self.now.isoformat()}
         e.update(kw)

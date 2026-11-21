@@ -128,6 +128,7 @@ class BrowserTests(unittest.TestCase):
         cfg['rooms'][0]['id'] = "');window.__legacyInjected=true;//"
         with server.connect() as connection:
             connection.execute('UPDATE config SET value=? WHERE id=1', (json.dumps(cfg),))
+        server.setup()  # simulate legacy data present at start-up (lenient v1 -> v2 merge)
         self.page.goto(self.url)
         self.page.get_by_role('button', name='1 Räume').click()
         self.page.get_by_role('button', name='Bearbeiten', exact=True).click()
