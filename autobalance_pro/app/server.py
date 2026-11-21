@@ -184,6 +184,10 @@ def quality(e,is_temperature,now):
         if not -60<=normalized<=150:return "implausible",normalized,unit
     elif e.get("entity_id","").startswith("binary_sensor.") and value not in ("on","off"):
         return "invalid_state",None,None
+    if not is_temperature:
+        # AB-011: contacts and status entities report on change only. Their age says nothing
+        # about validity; availability and a valid state are what count.
+        return "ok",normalized,unit
     age=age_seconds(e.get("source_at"),now)
     if age is None:return "missing_timestamp",normalized,unit
     if age < -60:return "future_timestamp",normalized,unit
@@ -224,7 +228,7 @@ def sample():
 
 def latest_observations(now=None):
     now=now or utcnow()
-    desired=wanted(load_v2())
+    cfg=load_v2();desired=wanted(cfg);temps=temperature_ids(cfg)
     with connect() as c:rows=c.execute("SELECT entity_id,state,unit,valid,at,source_at,quality,normalized_value,normalized_unit FROM samples WHERE id IN (SELECT MAX(id) FROM samples GROUP BY entity_id) ORDER BY entity_id").fetchall()
     observations=[]
     for row in rows:
@@ -233,7 +237,8 @@ def latest_observations(now=None):
         item["quality"]=item["quality"] or "unchecked"
         item["age_seconds"]=age_seconds(item["source_at"],now)
         sampled_age=age_seconds(item["at"],now)
-        item["stale"]=item["age_seconds"] is None or item["age_seconds"]>STALE_SECONDS or sampled_age is None or sampled_age>STALE_SECONDS
+        report_stale=item["entity_id"] in temps and (item["age_seconds"] is None or item["age_seconds"]>STALE_SECONDS)
+        item["stale"]=report_stale or sampled_age is None or sampled_age>STALE_SECONDS  # own acquisition must be fresh for every entity
         item["valid"]=bool(item["valid"] and item["quality"]=="ok" and not item["stale"])
         observations.append(item)
     return observations
