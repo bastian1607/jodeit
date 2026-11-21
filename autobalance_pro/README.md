@@ -2,6 +2,13 @@
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
+## Projektstatus und Zusammenarbeit (ab 21.11.2026)
+
+- [Aktueller, datierter Arbeitsstand](PROJECT_STATUS.md) für den Abgleich zwischen GitHub und Outline.
+- [Arbeitsregeln für Claude](CLAUDE.md): ChatGPT übernimmt UX/UI- und Produktdesign sowie fachliches Review; **Claude ist federführend für Programmierung und Tests**. Bastian/Jodeit entscheidet über Umsetzung, Merge, Release und Kundenanlagen.
+- Outline bleibt führende Produkt- und Backlog-Dokumentation: [Projektplanung](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD), [Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS) und [Workflow](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM).
+- Die App bleibt read-only. Neue Funktionen nur nach freigegebenem Auftrag, mit Branch, Tests, PR und dokumentiertem Status.
+
 ## Installation über das vorhandene Jodeit-Repository
 
 1. In Home Assistant **Einstellungen → Apps → App Store** öffnen.
