@@ -131,6 +131,10 @@ class QualityTests(unittest.TestCase):
                 html=response.read().decode()
                 self.assertNotIn('__APP_VERSION__',html)
                 self.assertIn('v'+server.VERSION,html)
+                self.assertIn('src="jodeit-logo.png"',html)
+            with urlopen(base+'/jodeit-logo.png') as response:
+                self.assertEqual(response.headers['Content-Type'],'image/png')
+                self.assertEqual(response.read()[:8],b'\x89PNG\r\n\x1a\n')
             with urlopen(base+'/api/overview') as response:self.assertEqual(json.load(response)['version'],server.VERSION)
             d=copy.deepcopy(self.config);d['heating']['outdoor']='light.bad'
             with self.assertRaises(HTTPError) as caught:urlopen(Request(base+'/api/config',json.dumps(d).encode(),{'Content-Type':'application/json'}))

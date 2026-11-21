@@ -198,6 +198,14 @@ class API(BaseHTTPRequestHandler):
             self.send_header("Content-Length",str(len(body)))
             self.end_headers()
             return self.wfile.write(body)
+        if path=="/jodeit-logo.png":
+            body=(ROOT/"static"/"jodeit-logo.png").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type","image/png")
+            self.send_header("Cache-Control","max-age=86400")
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         if path=="/health":return self.send_json(200,{"ok":True,"read_only":True,"version":VERSION})
         if path=="/api/config":return self.send_json(200,load())
         if path=="/api/entities":

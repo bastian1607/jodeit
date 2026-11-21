@@ -19,6 +19,10 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Unveröffentlichte Änderungen (Branch `feature/autobalance-AB-001-logo`)
+
+- AB-001: Original-Logo von Jodeit Systeme (`jodeit_evcc/jodeit-logo.png`, unverändert, SHA-256 `8e1593cf…7673`) im Header der Oberfläche und als `logo.png` für den HA App Store. Verwendung von Bastian am 21.11.2026 freigegeben. Keine Versionserhöhung; erst mit dem nächsten freigegebenen Release.
+
 ## Änderungen in v0.1.2
 
 Dieser freigegebene Release ergänzt v0.1.1. Manifest und Laufzeitversion sind 0.1.2.
