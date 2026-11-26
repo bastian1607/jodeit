@@ -1,10 +1,16 @@
 # AutoBalance Pro – überprüfter Projektstatus
-**Stichtag: 21.11.2026** · Dokumentationssnapshot, keine neue Funktionsfreigabe.
+**Stichtag: 26.11.2026** · Dokumentationssnapshot, keine neue Funktionsfreigabe.
 
 ## Quellen
 
 - Code: [bastian1607/jodeit – autobalance_pro](https://github.com/bastian1607/jodeit/tree/main/autobalance_pro), maßgeblich ist `main`.
 - Outline: [Pilotplanung](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD) · [Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS) · [AB-008 Datenmodell v2](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt) · [AB-009 Oberfläche](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-009-ubergabe-an-chatgpt-oberflache-fur-datenmodell-v2-wF0mbKy2cy) · [Zusammenarbeit](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM); Kurzregeln: [CLAUDE.md](CLAUDE.md).
+
+## Stand v0.2.1 (Release freigegeben von Bastian am 26.11.2026)
+
+- AB-011 (PR #8): Meldealter nur noch für Temperaturen; Kontakte/Status nach Erreichbarkeit.
+- AB-010: geordnetes Beenden bei SIGTERM, Exit 0.
+- Produktneuausrichtung 26.11.2026 (Heizkurven-Service, AB-012–AB-019) in Outline; noch keine Implementierung.
 
 ## Stand v0.2.0 (Release freigegeben von Bastian am 21.11.2026)
 
