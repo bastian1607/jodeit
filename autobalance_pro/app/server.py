@@ -1,5 +1,5 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
-import json,logging,math,os,re,sqlite3,threading,time,urllib.request
+import json,sys,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
 import model
 from datetime import datetime,timezone
@@ -243,11 +243,12 @@ def latest_observations(now=None):
         observations.append(item)
     return observations
 
-def loop():
-    while True:
+STOP=threading.Event()
+def loop(interval=300):
+    while not STOP.is_set():
         try:sample()
         except Exception:logging.exception("Lokale Messwerterfassung fehlgeschlagen")
-        time.sleep(300)
+        STOP.wait(interval)  # AB-010: wakes immediately on shutdown
 class API(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args):logging.info(fmt,*args)
     def send_json(self,code,obj):
@@ -309,7 +310,28 @@ class API(BaseHTTPRequestHandler):
             else:save_v2(data)
             return self.send_json(200,{"saved":True})
         except (ValueError,TypeError,KeyError,OverflowError,AttributeError) as exc:return self.send_json(400,{"error":str(exc)})
-if __name__=="__main__":
+def main(port=None,install_signals=True,ready=None):
+    """Run acquisition and HTTP API; return 0 after an orderly SIGTERM/SIGINT shutdown (AB-010)."""
+    import signal
     setup()
-    threading.Thread(target=loop,daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0",PORT),API).serve_forever()
+    STOP.clear()
+    httpd=ThreadingHTTPServer(("0.0.0.0",PORT if port is None else port),API)
+    worker=threading.Thread(target=loop,daemon=True,name="acquisition")
+    def stop(signum=None,frame=None):
+        if STOP.is_set():return
+        logging.info("Beenden angefordert (Signal %s)",signum)
+        STOP.set()
+        threading.Thread(target=httpd.shutdown,daemon=True).start()  # shutdown() blocks; never call it on the serving thread
+    if install_signals:
+        for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
+    worker.start()
+    if ready is not None:ready(httpd,stop)
+    try:httpd.serve_forever()
+    finally:
+        httpd.server_close()
+        worker.join(timeout=10)  # an in-flight HA request may take up to its own timeout
+        logging.info("AutoBalance beendet")
+    return 0
+
+if __name__=="__main__":
+    sys.exit(main())

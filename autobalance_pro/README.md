@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.2.0
+# Jodeit AutoBalance Pro v0.2.1
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -19,7 +19,10 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
-## Unveröffentlichte Änderungen
+## Änderungen in v0.2.1 (freigegeben 26.11.2026)
+
+- AB-010: Sauberes Beenden. SIGTERM/SIGINT stoppen Messschleife und HTTP-Server geordnet, Exit-Code 0. Die Messpause wartet
+  auf ein Stoppsignal statt 300 s fest zu schlafen. Behebt den Supervisor-Status „error“ nach dem Stoppen.
 
 - AB-011: Das Meldealter (30 Minuten) wird nur noch für Temperaturwerte geprüft. Fenster-/Türkontakte und
   Statusentitäten (Verdichter, Warmwasser, Pumpe) melden nur bei Zustandswechsel; für sie zählen
