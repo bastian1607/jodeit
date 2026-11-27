@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.5.0
+# Jodeit AutoBalance Pro v0.6.0
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -19,7 +19,7 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
-## Anlagendaten automatisch übernehmen (AB-029, in Entwicklung)
+## Anlagendaten automatisch übernehmen (AB-029)
 
 Ist in Schritt 3 ein Geräteprofil gewählt (z. B. Buderus · BBQKees/EMS-ESP · HMC310 · Heizkreis 1), füllt die App
 alle **leeren** Felder, die das Profil liefert:
@@ -86,6 +86,18 @@ Regeln (Review ChatGPT 12):
   Kundendaten ohne vorher extern verwahrte Liste der gelöschten Messungs-IDs (`/share/autobalance/…json`); nach
   einer Wiederherstellung vor der nächsten Kundenmessung bereinigen und prüfen. HA-Sicherungen auf dem Messkoffer
   dokumentiert der Techniker und ersetzt/löscht sie bei Fälligkeit gezielt (Betriebsanweisung in Outline).
+
+## Änderungen in v0.6.0 (freigegeben 27.11.2026)
+
+Weiterhin rein lesend gegenüber Wärmepumpe und Home Assistant.
+
+- AB-029: Schritt 3 übernimmt alle verfügbaren Werte des gewählten Geräteprofils (z. B. Buderus über BBQKees)
+  automatisch in leere Felder: Entitäten, Hersteller, Heizflächenart, Heizkurvenparameter laut Regler mit Quelle
+  und Datum. Herkunft je Feld; manuelle Werte und Werte ohne bestätigte Herkunft werden nie überschrieben;
+  Quellen-/Gateway-/Heizkreiswechsel nur mit Bestätigung; minimale Außentemperatur des Reglers wird nicht als
+  Norm-Außentemperatur übernommen. Details im Abschnitt „Anlagendaten automatisch übernehmen“.
+- Datenbank/Konfiguration additiv (`heat_source.circuit_id`, `heat_source.autofilled`). Rückweg: HA-Sicherung vor
+  dem Update wiederherstellen.
 
 ## Änderungen in v0.5.0 (freigegeben 27.11.2026)
 
