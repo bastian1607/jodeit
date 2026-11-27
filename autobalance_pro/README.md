@@ -19,6 +19,26 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Messdaten, Aufbewahrung und Löschung (AB-025, AB-026)
+
+- Jede Messung hat eine eigene ID. Messwerte, die während einer Messung erfasst werden, tragen diese ID.
+  Auswertung, Bericht und CSV einer Messung lesen nur diese Werte. Beim Start wird die Konfiguration samt
+  Geräteprofil gespeichert, beim Stoppen werden Auswertung und Bericht unverändert festgeschrieben.
+- **Automatische Löschung 30 Kalendertage nach Messende** (interne Jodeit-Regel, keine gesetzliche Frist):
+  Messwerte, Konfigurations-Snapshots, Bericht, Bezeichnung und Notiz. Die Frist wird durch Export, Bericht oder
+  Neustart nicht verlängert. Laufende Messungen werden nie automatisch gelöscht. Hinweise 7 Tage vorher (wenn
+  nicht archiviert) und am letzten Tag. Verpasste Fristen werden beim nächsten Start nachgeholt.
+- Messwerte außerhalb von Messungen, Konfigurationsverlauf und App-Ereignisse werden nach 30 Tagen gelöscht.
+- „Messung löschen“ (Bezeichnung zur Bestätigung eingeben) und „Gerät für neuen Kunden zurücksetzen“ in Schritt 5.
+- Physische Bereinigung: `PRAGMA secure_delete`, WAL-Checkpoint und `VACUUM`. Lokale Datenbanksicherungen in
+  `/data/backups`, die eine gelöschte Messung enthalten können, werden mit entfernt.
+- Löschregister ohne personenbezogene Daten in `/share/autobalance/geloeschte-messungen.json` (dafür ist der
+  Ordner `share` eingebunden): Nach Wiederherstellung einer reinen App-Sicherung löscht die App bereits gelöschte
+  Messungen beim Start erneut.
+- **Grenzen:** Home-Assistant-Sicherungen (vollständig oder App) enthalten den Datenstand zum Sicherungszeitpunkt.
+  Deren Aufbewahrung und Löschung liegt bei Home Assistant bzw. dem Betreiber. Wird eine Vollsicherung inklusive
+  `share` wiederhergestellt, gilt das Register dieses Zeitpunkts; Fristen werden trotzdem nachgeholt.
+
 ## Änderungen in v0.4.0 (freigegeben 27.11.2026)
 
 Weiterhin rein lesend: keine Steuerbefehle an Wärmepumpe, Ventile oder Home Assistant.

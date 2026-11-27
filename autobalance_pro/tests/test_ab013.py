@@ -165,15 +165,16 @@ class StorageTests(unittest.TestCase):
     def test_baseline_for_existing_installations_starts_at_first_sample(self):
         tmp = tempfile.TemporaryDirectory()
         server.DB = os.path.join(tmp.name, "old.db")
+        recent = (datetime.now(timezone.utc) - timedelta(days=2)).replace(microsecond=0).isoformat()
         try:
             with sqlite3.connect(server.DB) as c:
                 c.execute("CREATE TABLE samples (id INTEGER PRIMARY KEY, at TEXT, entity_id TEXT, state TEXT, unit TEXT, valid INTEGER)")
-                c.execute("INSERT INTO samples(at,entity_id,state,unit,valid) VALUES('2026-11-20T10:00:00+00:00','sensor.x','20','°C',1)")
+                c.execute("INSERT INTO samples(at,entity_id,state,unit,valid) VALUES(?,'sensor.x','20','°C',1)", (recent,))
             server.setup()
             server.setup()
             history = server.config_history()
             self.assertEqual(len(history), 1)
-            self.assertEqual(history[0][0], "2026-11-20T10:00:00+00:00")
+            self.assertEqual(history[0][0], recent)
         finally:
             server.DB = os.path.join(self.tmp.name, "autobalance.db")
             tmp.cleanup()

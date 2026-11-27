@@ -943,11 +943,35 @@ async function renderSessions(){
   const h=document.createElement('h3');h.textContent='Frühere Messungen';root.append(h);
   const list=document.createElement('div');list.id='session-history';
   if(!done.length){const p=document.createElement('p');p.className='hint';p.textContent='Noch keine abgeschlossene Messung.';list.append(p)}
-  for(const s of done){const row=document.createElement('div');row.className='item';
+  for(const s of done){const row=document.createElement('div');row.className='item job-row';
     const b=document.createElement('b');b.textContent=s.name;
     const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.finalized?' · Bericht festgeschrieben':'')+(s.note?' · '+s.note:'');
-    row.append(b,p,jobLinks(s));list.append(row)}
+    const due=document.createElement('div');due.className='job-due';
+    due.append(badge('Automatische Löschung am '+dateText(s.delete_due_at),s.deletion_notice?'bad':''),document.createTextNode(' '),
+      badge(s.archived_at?'In Kundenakte übernommen ('+dateText(s.archived_at)+')':'Noch nicht als archiviert bestätigt',s.archived_at?'good':'warn'));
+    const actions=document.createElement('div');actions.className='actions';
+    if(!s.archived_at){const ar=document.createElement('button');ar.type='button';ar.className='job-archive';ar.textContent='Archivierung bestätigen';
+      ar.addEventListener('click',async()=>{if(!confirm('Bestätigen, dass Bericht und CSV von „'+s.name+'“ in der Kundenakte gespeichert sind?\n\nDie automatische Löschung am '+dateText(s.delete_due_at)+' bleibt bestehen.'))return;
+        try{await api('v2/sessions/archive','POST',{id:s.id});notice('Archivierung bestätigt.');renderSessions();stats()}catch(ex){notice(ex.message,true)}});actions.append(ar)}
+    const del=document.createElement('button');del.type='button';del.className='danger job-delete';del.textContent='Messung löschen';
+    del.addEventListener('click',async()=>{const typed=prompt('Messung „'+s.name+'“ mit allen Messwerten und dem Bericht endgültig löschen.\n\nZur Bestätigung die Bezeichnung genau eingeben:');
+      if(typed===null)return;
+      try{await api('v2/sessions/delete','POST',{id:s.id,confirm:typed});notice('Messung gelöscht.');renderSessions();stats()}catch(ex){notice('Nicht gelöscht: '+ex.message,true)}});
+    actions.append(del);
+    row.append(b,p,due,jobLinks(s),actions);list.append(row)}
   root.append(list);
+  const reset=document.createElement('details');reset.className='section';reset.id='reset-box';
+  reset.innerHTML='<summary>Gerät für neuen Kunden zurücksetzen</summary><div class="body"><p class="hint">Löscht Räume, Zonen, Heizflächen, Anlagen- und Profilangaben, Konfigurationsverlauf, Messwerte außerhalb von Messungen und lokale Datenbanksicherungen. Abgeschlossene Messungen bleiben bis zu ihrer automatischen Löschung getrennt erhalten, außer du löschst sie hier mit.</p></div>';
+  const rb=document.createElement('button');rb.type='button';rb.className='danger';rb.id='reset-start';rb.textContent='Zurücksetzen …';
+  rb.disabled=Boolean(sessionsData.active);
+  rb.addEventListener('click',async()=>{
+    const typed=prompt('Gerät für einen neuen Kunden zurücksetzen.\n\nZur Bestätigung NEUER KUNDE eingeben:');if(typed===null)return;
+    const jobs=done.length?confirm('Auch die '+done.length+' abgeschlossenen Messungen jetzt löschen?\n\nOK = ja, mitlöschen · Abbrechen = behalten bis zur automatischen Löschung'):false;
+    try{const r=await api('v2/reset','POST',{confirm:typed,delete_jobs:jobs});notice('Gerät zurückgesetzt'+(r.jobs_deleted?' · '+r.jobs_deleted+' Messungen gelöscht':'')+'.');cfg=await api('v2/config');saved=clone(cfg);await loadRoomsStatus();renderSessions();stats()}
+    catch(ex){notice('Nicht zurückgesetzt: '+ex.message,true)}});
+  reset.querySelector('.body').append(rb);
+  if(sessionsData.active){const w=document.createElement('p');w.className='hint';w.textContent='Während einer laufenden Messung nicht möglich.';reset.querySelector('.body').append(w)}
+  root.append(reset);
 }
 /* Übersicht: Messung direkt beginnen oder stoppen */
 async function renderQuickMeasurement(){
@@ -967,6 +991,12 @@ async function renderQuickMeasurement(){
     box.append(t,go);
   }
   root.append(box);
+  // AB-026: notice before the automatic deletion (7 days if not archived, always on the last day)
+  for(const s of d.sessions.filter(x=>x.deletion_notice)){
+    const w=document.createElement('div');w.className='alert error retention-notice';
+    w.textContent='Messung „'+s.name+'“ wird am '+dateText(s.delete_due_at)+' automatisch vom Gerät gelöscht.'+(s.archived_at?'':' Bericht und CSV vorher in die Kundenakte übernehmen und die Archivierung bestätigen (Schritt 5).');
+    root.append(w);
+  }
 }
 /* ---------- AB-014 Aussagekraft des Messauftrags (nur lesend) ---------- */
 const STAGE_KIND={no_data:'warn',insufficient:'bad',unverified:'warn',level:'warn',level_and_slope:'good'};

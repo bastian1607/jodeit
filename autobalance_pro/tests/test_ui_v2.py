@@ -88,7 +88,7 @@ class V2Browser(unittest.TestCase):
         for method, path in self.requests:
             self.assertTrue(path.startswith("/api/") or path in ("/", "/jodeit-logo.png"), path)
             if method == "POST":
-                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop"), path)
+                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop", "/api/v2/sessions/archive", "/api/v2/sessions/delete", "/api/v2/reset"), path)
 
     # ------------------------------------------------------------- helpers
     def v2(self):
@@ -765,6 +765,39 @@ class MobileTests(V2Browser):
         self.tab("3 Heizungsanlage & Heizkreise")
         expect(self.page.locator("#hs-detect-box")).to_contain_text("Teilweise erkannt")
         expect(self.page.locator("#hs-adopt")).to_have_count(0)
+
+
+    def test_ab026_retention_archive_delete_and_reset(self):
+        """AB-026: Löschtermin und Hinweis sichtbar, Archivierung, Löschen mit Bestätigung, Zurücksetzen."""
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        self.seed(rooms=("Wohnzimmer",))
+        with patch.object(server, "utcnow", return_value=now - timedelta(days=25)):
+            job = server.start_session({"name": "J-2026-123 Müller", "confirmed": True})
+        with patch.object(server, "utcnow", return_value=now - timedelta(days=24)):
+            server.stop_session(job["id"])
+        self.open()
+        expect(self.page.locator(".retention-notice")).to_contain_text("J-2026-123 Müller")
+        expect(self.page.locator(".retention-notice")).to_contain_text("automatisch vom Gerät gelöscht")
+        self.tab("5 Prüfen & Messung")
+        row = self.page.locator("#session-history .job-row")
+        expect(row).to_contain_text("Automatische Löschung am")
+        expect(row).to_contain_text("Noch nicht als archiviert bestätigt")
+        self.page.once("dialog", lambda d: d.accept())
+        row.locator(".job-archive").click()
+        expect(row).to_contain_text("In Kundenakte übernommen")
+        self.shot("ab026-loeschung")
+        self.page.once("dialog", lambda d: d.accept("falsch"))
+        row.locator(".job-delete").click()
+        expect(self.page.locator("#notice")).to_contain_text("Bezeichnung der Messung genau eingeben")
+        self.page.once("dialog", lambda d: d.accept("J-2026-123 Müller"))
+        row.locator(".job-delete").click()
+        expect(self.page.locator("#session-history")).to_contain_text("Noch keine abgeschlossene Messung")
+        self.page.locator("#reset-box summary").click()
+        self.page.once("dialog", lambda d: d.accept("NEUER KUNDE"))
+        self.page.click("#reset-start")
+        expect(self.page.locator("#notice")).to_contain_text("Gerät zurückgesetzt")
+        self.assertEqual(self.v2()["rooms"], [])
 
 
 if __name__ == "__main__":

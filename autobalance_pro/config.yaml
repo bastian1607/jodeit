@@ -17,5 +17,7 @@ homeassistant_api: true
 map:
   - type: data
     read_only: false
+  - type: share          # AB-026: deletion register outside the app's own backup (/share/autobalance)
+    read_only: false
 options: {}
 schema: {}

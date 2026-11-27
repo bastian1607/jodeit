@@ -1,7 +1,7 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
 import json,sys,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
-import model,coverage,devices,monitoring,assessment,report,uuid
+import model,coverage,devices,monitoring,assessment,report,retention,uuid
 from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +18,7 @@ ENTITY_PATTERN=re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 def connect():
     c=sqlite3.connect(DB,timeout=10)
     c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA secure_delete=ON")   # AB-026: deleted content is overwritten, not just unlinked
     return c
 def setup():
     Path(DB).parent.mkdir(parents=True,exist_ok=True)
@@ -48,8 +49,10 @@ def setup():
         if "session_id" not in columns:c.execute("ALTER TABLE samples ADD COLUMN session_id TEXT")
         c.execute("CREATE INDEX IF NOT EXISTS samples_session ON samples(session_id,at)")
         columns={row[1] for row in c.execute("PRAGMA table_info(sessions)")}
-        for name in ("config_start","history","report_html","assessment","finalized_at","app_version"):
+        for name in ("config_start","history","report_html","assessment","finalized_at","app_version","delete_due_at","archived_at"):
             if name not in columns:c.execute(f"ALTER TABLE sessions ADD COLUMN {name} TEXT")
+        # AB-026: minimal deletion log without personal data (random job id, time, reason, counts).
+        c.execute("CREATE TABLE IF NOT EXISTS deletion_log (id INTEGER PRIMARY KEY, session_ref TEXT NOT NULL, deleted_at TEXT NOT NULL, reason TEXT NOT NULL, samples_deleted INTEGER NOT NULL, backups_deleted INTEGER NOT NULL)")
     sync_config()
     with LOCK, connect() as c:
         if not c.execute("SELECT 1 FROM config_history LIMIT 1").fetchone():
@@ -57,6 +60,11 @@ def setup():
             first=c.execute("SELECT MIN(at) FROM samples").fetchone()[0]
             c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(first or utcnow().isoformat(),"baseline",json.dumps(load_v2(),ensure_ascii=False)))
     migrate_sessions()
+    with connect() as c:   # AB-026: deadline for jobs stopped before this version
+        for sid,end in c.execute("SELECT id,ended_at FROM sessions WHERE ended_at IS NOT NULL AND delete_due_at IS NULL").fetchall():
+            c.execute("UPDATE sessions SET delete_due_at=? WHERE id=?",(retention.due_at(coverage.parse(end)).isoformat(),sid))
+    apply_register()
+    purge()
 
 def backup_database(reason):
     """Consistent copy via the SQLite backup API (safe with WAL), stored next to the DB."""
@@ -349,9 +357,11 @@ def target_changes(start=None,end=None):
     return changes
 
 SESSION_NAME=re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")  # AB-024: free text (name, order/offer …); output is always escaped
-SESSION_COLUMNS="id,name,started_at,ended_at,planned_days,rooms,note,finalized_at,app_version"
+SESSION_COLUMNS="id,name,started_at,ended_at,planned_days,rooms,note,finalized_at,app_version,delete_due_at,archived_at"
 def _session_row(r):
-    d=dict(zip(SESSION_COLUMNS.split(","),r));d["rooms"]=json.loads(d["rooms"]);d["finalized"]=bool(d["finalized_at"]);return d
+    d=dict(zip(SESSION_COLUMNS.split(","),r));d["rooms"]=json.loads(d["rooms"]);d["finalized"]=bool(d["finalized_at"])
+    d["deletion_notice"]=retention.notice(coverage.parse(d["delete_due_at"]),bool(d["archived_at"]),utcnow()) if d["delete_due_at"] else None
+    return d
 
 def list_sessions():
     with connect() as c:rows=c.execute(f"SELECT {SESSION_COLUMNS} FROM sessions ORDER BY started_at DESC").fetchall()
@@ -423,7 +433,7 @@ def stop_session(sid,now=None):
         if not s:raise ValueError("Messauftrag nicht gefunden")
         if s["ended_at"]:raise ValueError("Messauftrag ist bereits beendet")
         end=now or utcnow()
-        with connect() as c:c.execute("UPDATE sessions SET ended_at=? WHERE id=?",(end.isoformat(),sid))
+        with connect() as c:c.execute("UPDATE sessions SET ended_at=?,delete_due_at=? WHERE id=?",(end.isoformat(),retention.due_at(end).isoformat(),sid))
         finalize_session(sid,end)
     log_event("session_stop",sid)
     return get_session(sid)
@@ -438,6 +448,118 @@ def finalize_session(sid,end):
         html=session_report(sid,end,frozen_at=end,result=result)
         with connect() as c:c.execute("UPDATE sessions SET assessment=?,report_html=?,finalized_at=?,app_version=COALESCE(app_version,?) WHERE id=? AND finalized_at IS NULL",
             (json.dumps(result,ensure_ascii=False),html,end.isoformat(),VERSION,sid))
+
+# ------------------------------------------------------------------ AB-026 retention and deletion
+def _backup_files():
+    folder=Path(DB).parent/"backups"
+    return sorted(folder.glob("*.db")) if folder.exists() else []
+
+def _compact():
+    """Make deleted rows physically disappear from the database files (WAL and free pages)."""
+    c=sqlite3.connect(DB,timeout=30)
+    try:
+        c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        c.execute("VACUUM")
+        c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:c.close()
+
+def deleted_info(sid):
+    with connect() as c:r=c.execute("SELECT deleted_at,reason FROM deletion_log WHERE session_ref=? ORDER BY id DESC LIMIT 1",(sid,)).fetchone()
+    return {"deleted_at":r[0],"reason":r[1]} if r else None
+
+def delete_session(sid,reason,now=None,compact=True):
+    """Delete one stopped job completely: its samples, snapshots, frozen report, name and note.
+
+    Local SQLite backups created after the job started may contain its data and are removed too.
+    Other jobs are untouched (their samples carry their own session_id). Returns the log entry."""
+    now=now or utcnow()
+    with LOCK:
+        s=get_session(sid)
+        if not s:raise ValueError("Messung nicht gefunden")
+        if not s["ended_at"]:raise ValueError("Laufende Messung zuerst stoppen")
+        with connect() as c:
+            n=c.execute("DELETE FROM samples WHERE session_id=?",(sid,)).rowcount
+            c.execute("DELETE FROM sessions WHERE id=?",(sid,))
+        removed=0
+        start=coverage.parse(s["started_at"])
+        for f in _backup_files():
+            if datetime.fromtimestamp(f.stat().st_mtime,timezone.utc)>=start:
+                f.unlink(missing_ok=True);removed+=1
+        entry={"session_ref":sid,"deleted_at":now.isoformat(),"reason":reason,"samples_deleted":n,"backups_deleted":removed}
+        with connect() as c:c.execute("INSERT INTO deletion_log(session_ref,deleted_at,reason,samples_deleted,backups_deleted) VALUES(?,?,?,?,?)",
+            (sid,entry["deleted_at"],reason,n,removed))
+        retention.append_register({"id":sid,"deleted_at":entry["deleted_at"],"reason":reason})
+        if compact:_compact()
+    log_event("session_deleted",sid)
+    logging.info("Messung %s gelöscht (%s): %s Messwerte, %s lokale Sicherungen",sid,reason,n,removed)
+    return entry
+
+def purge(now=None):
+    """Delete jobs past their deadline and loose data older than 30 days. Safe to run any time;
+    catches up missed deadlines after downtime (AC-026-05)."""
+    now=now or utcnow()
+    done=[]
+    with LOCK:
+        with connect() as c:
+            due=[r[0] for r in c.execute("SELECT id FROM sessions WHERE ended_at IS NOT NULL AND delete_due_at<=?",(now.isoformat(),))]
+        for sid in due:
+            try:done.append(delete_session(sid,"frist",now,compact=False))
+            except Exception:logging.exception("Automatische Löschung fehlgeschlagen")   # no personal data in the log
+        limit=(now-timedelta(days=retention.LOOSE_DATA_DAYS)).isoformat()
+        with connect() as c:
+            loose=c.execute("DELETE FROM samples WHERE session_id IS NULL AND at<?",(limit,)).rowcount
+            newest=c.execute("SELECT MAX(id) FROM config_history").fetchone()[0]
+            active=c.execute("SELECT MIN(started_at) FROM sessions WHERE ended_at IS NULL").fetchone()[0]
+            keep_from=min(limit,active) if active else limit   # a running job still needs its change history
+            c.execute("DELETE FROM config_history WHERE at<? AND id<>?",(keep_from,newest or -1))
+            c.execute("DELETE FROM app_events WHERE at<?",(limit,))
+        old=0
+        for f in _backup_files():
+            if datetime.fromtimestamp(f.stat().st_mtime,timezone.utc)<now-timedelta(days=retention.LOOSE_DATA_DAYS):
+                f.unlink(missing_ok=True);old+=1
+        if done or loose or old:_compact()
+    return {"jobs":done,"loose_samples":loose,"old_backups":old}
+
+def apply_register():
+    """After an app-only restore: delete jobs again that were deleted before (register outside /data)."""
+    for entry in retention.read_register():
+        if get_session(entry["id"]):
+            try:delete_session(entry["id"],"erneut nach Wiederherstellung")
+            except ValueError:logging.warning("Wiederhergestellte Messung läuft noch und wird nicht gelöscht")
+
+def archive_session(sid,now=None):
+    """Technician confirms that report/CSV are stored in the customer file. Does not move the deadline."""
+    with LOCK:
+        s=get_session(sid) if isinstance(sid,str) else None
+        if not s:raise ValueError("Messung nicht gefunden")
+        if not s["ended_at"]:raise ValueError("Laufende Messung zuerst stoppen")
+        with connect() as c:c.execute("UPDATE sessions SET archived_at=COALESCE(archived_at,?) WHERE id=?",((now or utcnow()).isoformat(),sid))
+    return get_session(sid)
+
+RESET_WORD="NEUER KUNDE"
+def reset_for_new_customer(data,now=None):
+    """AB-026 item 4: clear the current customer before the device is installed elsewhere.
+
+    Clears configuration, configuration history, passive samples and local backups. Stopped jobs stay
+    (isolated, with their deadline) unless ``delete_jobs`` is set. Not allowed while a job runs."""
+    if not isinstance(data,dict) or data.get("confirm")!=RESET_WORD:raise ValueError(f"Zur Bestätigung „{RESET_WORD}“ eingeben")
+    now=now or utcnow()
+    with LOCK:
+        if list_sessions()["active"]:raise ValueError("Laufende Messung zuerst stoppen")
+        deleted=[]
+        if data.get("delete_jobs") is True:
+            for s in list_sessions()["sessions"]:deleted.append(delete_session(s["id"],"zurückgesetzt",now,compact=False))
+        empty_cfg=model.empty()
+        with connect() as c:
+            loose=c.execute("DELETE FROM samples WHERE session_id IS NULL").rowcount
+            c.execute("DELETE FROM config_history")
+            c.execute("DELETE FROM acquisition")
+            _write_config(c,empty_cfg)
+            c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(now.isoformat(),"reset",json.dumps(empty_cfg)))
+        for f in _backup_files():f.unlink(missing_ok=True)
+        _compact()
+    log_event("reset",None)
+    return {"jobs_deleted":len(deleted),"loose_samples":loose}
 
 def plant_timezone():
     """Local time zone of the plant for the night definition (AB-014). HA passes TZ to apps."""
@@ -572,9 +694,14 @@ def acquisition_health(now=None):
 
 STOP=threading.Event()
 def loop(interval=300):
+    last_purge=time.monotonic()
     while not STOP.is_set():
         try:sample()
         except Exception:logging.exception("Lokale Messwerterfassung fehlgeschlagen")
+        if time.monotonic()-last_purge>=retention.PURGE_INTERVAL_SECONDS:
+            last_purge=time.monotonic()
+            try:purge()
+            except Exception:logging.exception("Löschlauf fehlgeschlagen")
         STOP.wait(interval)  # AB-010: wakes immediately on shutdown
 class API(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args):logging.info(fmt,*args)
@@ -633,6 +760,13 @@ class API(BaseHTTPRequestHandler):
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
         if path=="/api/v2/rooms/status":return self.send_json(200,rooms_status())
         if path=="/api/v2/sessions":return self.send_json(200,list_sessions())
+        if path.startswith("/api/v2/sessions/") and path.count("/")==5:
+            gone=deleted_info(path.split("/")[4])
+            if gone and not get_session(path.split("/")[4]):
+                return self.send_json(410,{"error":"Messung wurde am "+gone["deleted_at"][:10]+" gelöscht","deleted":gone})
+        if path=="/api/v2/retention":
+            with connect() as c:log=[dict(zip(("session_ref","deleted_at","reason","samples_deleted","backups_deleted"),r)) for r in c.execute("SELECT session_ref,deleted_at,reason,samples_deleted,backups_deleted FROM deletion_log ORDER BY id DESC LIMIT 50")]
+            return self.send_json(200,{"retention_days":retention.RETENTION_DAYS,"warn_days":list(retention.WARN_DAYS),"log":log,"register":str(retention.REGISTER_DIR)})
         if path.startswith("/api/v2/sessions/") and path.endswith("/report"):
             body=session_report(path.split("/")[4])
             if body is None:return self.send_json(404,{"error":"Messauftrag nicht gefunden"})
@@ -676,7 +810,7 @@ class API(BaseHTTPRequestHandler):
         return self.send_json(404,{"error":"Nicht gefunden"})
     def do_POST(self):
         path=urlsplit(self.path).path
-        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion","/api/v2/heat-source/test","/api/v2/sessions/start","/api/v2/sessions/stop"):return self.send_json(404,{"error":"Nicht gefunden"})
+        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion","/api/v2/heat-source/test","/api/v2/sessions/start","/api/v2/sessions/stop","/api/v2/sessions/archive","/api/v2/sessions/delete","/api/v2/reset"):return self.send_json(404,{"error":"Nicht gefunden"})
         limit=100000 if path=="/api/config" else 500000
         try:
             size=int(self.headers.get("Content-Length","0"))
@@ -684,6 +818,13 @@ class API(BaseHTTPRequestHandler):
             data=json.loads(self.rfile.read(size))
             if path=="/api/v2/sessions/start":return self.send_json(200,start_session(data))
             if path=="/api/v2/sessions/stop":return self.send_json(200,stop_session(data.get("id") if isinstance(data,dict) else None))
+            if path=="/api/v2/sessions/archive":return self.send_json(200,archive_session(data.get("id") if isinstance(data,dict) else None))
+            if path=="/api/v2/sessions/delete":
+                s=get_session(data.get("id")) if isinstance(data,dict) and isinstance(data.get("id"),str) else None
+                if not s:raise ValueError("Messung nicht gefunden")
+                if data.get("confirm")!=s["name"]:raise ValueError("Zur Bestätigung die Bezeichnung der Messung genau eingeben")
+                return self.send_json(200,delete_session(s["id"],"manuell"))
+            if path=="/api/v2/reset":return self.send_json(200,reset_for_new_customer(data))
             if path=="/api/v2/heat-source/test":
                 # Read-only probe of the unsaved selection; stores nothing, sends nothing to the device.
                 if not isinstance(data,dict):raise ValueError("Datenquelle fehlt")
