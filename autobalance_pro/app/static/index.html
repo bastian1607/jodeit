@@ -39,6 +39,7 @@ details.card>.body{padding:0 12px 12px}
 .seg{display:flex;gap:8px;flex-wrap:wrap}
 .seg label{display:flex;align-items:center;gap:6px;border:1px solid #bacbd3;border-radius:8px;padding:9px 12px;margin:0;font-weight:500;cursor:pointer}
 .seg input{width:auto;margin:0}
+.check-row{display:flex;align-items:center;gap:8px;margin:12px 0}.check-row input{width:auto;margin:0}
 .unit{display:flex;align-items:center;gap:6px}
 .unit span{color:#5c6e79;font-size:13px;min-width:24px}
 .status{display:inline-block;font-size:12px;border-radius:12px;padding:3px 9px;background:#e9ecea;color:#303436}
@@ -69,21 +70,21 @@ details.card>.body{padding:0 12px 12px}
 
 <section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div class="grid" id="stats"></div>
 <div id="heat-snapshot"></div>
-<p>Beginne mit den Räumen: Name und mindestens ein Temperaturfühler reichen für die Messung. Heizlast, Heizkreise und Heizflächen kannst du später ergänzen.</p>
+<p>Beginne mit den Räumen: Name und Solltemperatur reichen. Überwacht werden nur Räume mit Temperaturfühler; drei gezielt platzierte Fühler sind das Basispaket. Heizlast, Heizkreise und Heizflächen kannst du später ergänzen.</p>
 <button class="primary" data-goto="rooms">Räume einrichten</button></section>
 
 <section id="rooms" class="tab hidden">
-<div class="panel"><div class="row"><h2>Räume</h2><button class="primary" id="add-room">+ Raum anlegen</button></div><div id="room-list"></div></div>
+<div class="panel"><div class="row"><h2>Räume</h2><button class="primary" id="add-room">+ Raum anlegen</button></div><div id="room-coverage"></div><div id="room-list"></div></div>
 <div id="room-editor" class="panel hidden"><h2 id="room-heading">Raum</h2>
 <form id="room-form" novalidate>
 <details class="section" id="sec-basis" open><summary>Basis</summary><div class="body"><div class="grid">
 <div><label for="r-name">Raumname</label><input id="r-name" maxlength="100" autocomplete="off"></div>
-<div><label for="r-target">Solltemperatur</label><div class="unit"><input id="r-target" inputmode="decimal"><span>°C</span></div></div>
+<div><label for="r-target">Komfort-Solltemperatur</label><div class="unit"><input id="r-target" inputmode="decimal"><span>°C</span></div></div>
 <div><label for="r-area">Fläche, optional</label><div class="unit"><input id="r-area" inputmode="decimal"><span>m²</span></div></div>
 <div><label for="r-circuit">Standard-Heizkreis (Vorbelegung für neue Heizflächen)</label><select id="r-circuit"></select></div>
 </div></div></details>
 <details class="section" id="sec-sensors" open><summary>Sensoren</summary><div class="body">
-<h3>Temperatursensoren · mindestens 1</h3><div id="r-temperature"></div>
+<h3>Temperaturfühler · optional</h3><p class="hint">Ohne Fühler bleibt der Raum mit seiner Solltemperatur erfasst, gilt aber als „nicht überwacht“: keine Isttemperatur, keine Bewertung.</p><div id="r-temperature"></div>
 <h3>Fenster- und Türkontakte · optional</h3><div id="r-windows"></div></div></details>
 <details class="section" id="sec-heat-load"><summary>Raumheizlast aus Berechnung übernehmen <span id="hl-badge" class="status"></span></summary><div class="body">
 <p class="hint">Wert aus vorhandener raumweiser Berechnung eintragen. AutoBalance berechnet die Heizlast nicht selbst.</p>
@@ -97,6 +98,12 @@ details.card>.body{padding:0 12px 12px}
 <div><label for="hl-reference">Quelle / Dokumentbezeichnung</label><input id="hl-reference" placeholder="z. B. Heizlastberechnung, Software, Seite"></div>
 <div><label for="hl-date">Berechnungsdatum</label><input id="hl-date" type="date"></div>
 <div><label for="hl-author">Ersteller, optional</label><input id="hl-author"></div>
+</div>
+<h3>Auslegungs-Innentemperatur · optional</h3>
+<p class="hint">Raumtemperatur aus der Heizlast-/Heizkörperberechnung. Unabhängig von der Komfort-Solltemperatur; fehlt sie, rechnet AutoBalance nicht ersatzweise mit dem Komfortziel.</p>
+<div class="grid">
+<div><label for="r-design">Auslegungs-Innentemperatur</label><div class="unit"><input id="r-design" inputmode="decimal"><span>°C</span></div></div>
+<div><label for="r-design-ref">Quelle</label><input id="r-design-ref" placeholder="z. B. Heizlastberechnung, Seite"></div>
 </div></div></details>
 <details class="section" id="sec-emitters"><summary>Heizflächen <span id="em-badge" class="status"></span></summary><div class="body">
 <div id="r-radiators"></div>
@@ -151,6 +158,9 @@ details.card>.body{padding:0 12px 12px}
 <div class="panel"><h2>A · Passive Messung</h2>
 <p class="hint">Die Messung läuft automatisch alle fünf Minuten, sobald einem Raum ein Temperaturfühler zugeordnet ist. Fehlende Heizlast-, Heizkreis- oder Heizkörperdaten halten sie nicht an.</p>
 <div id="measure-list"></div>
+<h3>Messauftrag</h3>
+<p class="hint">Ein Messauftrag grenzt den ausgewerteten Zeitraum je Einsatzort ab (Ziel ca. 7 Tage). Er speichert nur lokal und sendet nichts an Home Assistant oder die Wärmepumpe.</p>
+<div id="session-panel"></div>
 <h3>Datenabdeckung der letzten 7 Tage</h3>
 <p class="hint">Zeiträume ohne gespeicherte Messung bleiben als Lücke sichtbar, auch nach einem Neustart. Es werden keine Werte nachträglich aufgefüllt.</p>
 <div id="data-quality">Wird geladen …</div>
@@ -219,7 +229,7 @@ function tab(t,force=false){
   if(!force){roomDirty=false;plantDirty=false;plantDraft=null;el('room-editor').classList.add('hidden');editingRoom=null}
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('hidden',x.id!==t));
   document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
-  ({rooms:showRooms,zones:showZones,plant:showPlant,emitters:showEmitterOverview,check:showCheck,dashboard:stats})[t]?.();
+  ({rooms:refreshRooms,zones:showZones,plant:showPlant,emitters:showEmitterOverview,check:showCheck,dashboard:stats})[t]?.();
   return true;
 }
 document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>tab(b.dataset.tab)));
@@ -285,11 +295,23 @@ function checkItems(dest,kind,selected,onchange){
 function checked(dest){return entitySelections[dest]?[...entitySelections[dest]]:[...el(dest).querySelectorAll('input:checked')].map(x=>x.value)}
 
 /* ---------- status per room ---------- */
+const RS_KIND={monitored:'good',not_monitored:'',waiting:'warn',sensor_unavailable:'bad',stale:'bad',check_value:'bad',disagree:'warn'};
+let roomsData=null;
+async function loadRoomsStatus(){try{roomsData=await api('v2/rooms/status')}catch(_){roomsData=null}return roomsData}
 function roomStatus(room){
-  if(!room.temperature_sensors.length)return ['Temperatursensor fehlt','bad'];
+  if(!room.temperature_sensors.length)return ['Nicht überwacht',''];
+  const live=roomsData?.rooms?.find(x=>x.id===room.id);
+  if(live&&live.status!=='monitored')return [live.status_text,RS_KIND[live.status]||'warn'];
   const r=readinessData?.rooms?.[room.id];
-  if(!r)return ['Messbereit','good'];
-  return r.blockers.length?['Messbereit · Angaben für Abgleich fehlen','warn']:['Messbereit · Auslegungsdaten vollständig – Berechnung noch nicht verfügbar','good'];
+  if(!r)return ['Überwacht','good'];
+  return r.blockers.length?['Überwacht · Angaben für Abgleich fehlen','warn']:['Überwacht · Auslegungsdaten vollständig – Berechnung noch nicht verfügbar','good'];
+}
+async function refreshRooms(){showRooms();await loadRoomsStatus();if(!el('rooms').classList.contains('hidden'))showRooms()}
+function coverageText(c){
+  let t=c.rooms_with_sensor+' von '+c.rooms+' Räumen mit Temperaturfühler · '+c.zones_with_sensor+' von '+c.zones+' thermischen Zonen mit Messpunkt';
+  if(c.rooms_without_sensor.length)t+=' · nicht überwacht: '+c.rooms_without_sensor.join(', ');
+  if(c.zones_partial.length)t+=' · Zone nur teilweise gemessen: '+c.zones_partial.join(', ');
+  return t;
 }
 function badge(text,kind){const s=document.createElement('span');s.className='status '+(kind||'');s.textContent=text;return s}
 function circuitName(id){return cfg.circuits.find(c=>c.id===id)?.name||'Unbekannter Heizkreis'}
@@ -297,6 +319,8 @@ function circuitName(id){return cfg.circuits.find(c=>c.id===id)?.name||'Unbekann
 /* ---------- 1 Räume ---------- */
 function showRooms(){
   const list=el('room-list');list.replaceChildren();
+  const cov=el('room-coverage');cov.replaceChildren();
+  if(roomsData&&cfg.rooms.length){const p=document.createElement('p');p.className='info-box';p.id='coverage-line';p.textContent=coverageText(roomsData.coverage)+'. Abdeckung, kein Komfortnachweis.';cov.append(p)}
   if(!cfg.rooms.length){const p=document.createElement('p');p.textContent='Keine Räume angelegt.';list.append(p);return}
   for(const r of cfg.rooms){
     const item=document.createElement('div');item.className='item row';
@@ -307,6 +331,9 @@ function showRooms(){
     sub.textContent=r.temperature_sensors.length+' Temperaturfühler · '+r.window_sensors.length+' Fensterkontakte · '+count+' Heizflächen';
     const [text,kind]=roomStatus(r);
     info.append(sub,badge(text,kind));
+    const hints=roomsData?.hints?.[r.id]||[];
+    if(hints.length&&!r.temperature_sensors.length){const h=document.createElement('div');h.className='hint room-hint';h.textContent='Als Messpunkt prüfen: '+hints.join(' · ');info.append(h)}
+    else if(hints.length){const h=document.createElement('div');h.className='hint room-hint';h.textContent='Messpunkt begründet: '+hints.join(' · ');info.append(h)}
     const actions=document.createElement('div');
     const edit=document.createElement('button');edit.textContent='Bearbeiten';edit.addEventListener('click',()=>openRoom(r.id));
     const del=document.createElement('button');del.className='danger';del.textContent='Löschen';del.addEventListener('click',()=>deleteRoom(r.id));
@@ -316,7 +343,7 @@ function showRooms(){
 el('add-room').addEventListener('click',()=>{try{openRoom(null)}catch(ex){notice('Raum kann nicht angelegt werden: '+ex.message,true)}});
 let roomEmitters=[];
 function newRoom(){return {id:newId(),name:'',target:21,area:null,default_circuit_id:cfg.circuits[0]?.id||null,
-  heat_load:{status:'missing',value_w:null,method:'',reference:'',author:'',date:null,legacy_value_w:null},temperature_sensors:[],window_sensors:[]}}
+  heat_load:{status:'missing',value_w:null,method:'',reference:'',author:'',date:null,legacy_value_w:null},design_indoor_c:null,design_indoor_reference:'',temperature_sensors:[],window_sensors:[]}}
 function openRoom(id,emitterId=null,sectionId=null){
   if(!el('room-editor').classList.contains('hidden')&&roomDirty&&!confirm('Es gibt ungespeicherte Änderungen. Verwerfen?'))return;
   if(el('rooms').classList.contains('hidden')&&!tab('rooms'))return;
@@ -329,6 +356,7 @@ function openRoom(id,emitterId=null,sectionId=null){
   checkItems('r-windows','window',room.window_sensors,markRoomDirty);
   const hl=room.heat_load;
   document.querySelector('input[name=hl-status][value='+(hl.status==='adopted'?'adopted':'missing')+']').checked=true;
+  el('r-design').value=showNum(room.design_indoor_c);el('r-design-ref').value=room.design_indoor_reference||'';
   el('hl-value').value=showNum(hl.value_w);el('hl-method').value=hl.method||'';el('hl-reference').value=hl.reference||'';el('hl-date').value=hl.date||'';el('hl-author').value=hl.author||'';
   const legacy=el('hl-legacy');
   legacy.classList.toggle('hidden',hl.legacy_value_w===null||hl.legacy_value_w===undefined);
@@ -471,8 +499,10 @@ function buildRoomDraft(errors,strict=true){
   if(target===null)errors.push('Bitte eine Solltemperatur angeben.');
   else if(target<5||target>35)errors.push('Solltemperatur muss zwischen 5 und 35 °C liegen.');
   const area=readNum('#r-area','Fläche',errors);
-  const temps=checked('r-temperature');
-  if(!temps.length)errors.push('Für '+(name||'diesen Raum')+' fehlt noch ein Temperatursensor. Bitte eine Home-Assistant-Entität auswählen.');
+  const temps=checked('r-temperature');   // AB-013: 0 sensors allowed ("nicht überwacht")
+  const design=readNum('#r-design','Auslegungs-Innentemperatur',errors),designRef=el('r-design-ref').value.trim();
+  if(design!==null&&(design<5||design>35))errors.push('Auslegungs-Innentemperatur muss zwischen 5 und 35 °C liegen.');
+  if(design!==null&&!designRef)errors.push('Bitte die Quelle der Auslegungs-Innentemperatur angeben.');
   const adopted=document.querySelector('input[name=hl-status]:checked').value==='adopted';
   const prev=editingRoom.heat_load;
   let heat_load={status:'missing',value_w:null,method:'',reference:'',author:'',date:null,legacy_value_w:prev.legacy_value_w??null};
@@ -494,7 +524,7 @@ function buildRoomDraft(errors,strict=true){
       errors.push('Heizlastanteile: zusammen '+showNum(Math.round(given.reduce((a,b)=>a+b,0)*10)/10)+' %. Bitte für alle Heizflächen ausfüllen und auf 100 % vervollständigen – oder alle Anteile leer lassen.');
   }
   if(errors.length){notice(errors.join(' '),true);return null}
-  const room={...editingRoom,name,target,area,default_circuit_id:el('r-circuit').value||null,heat_load,temperature_sensors:temps,window_sensors:checked('r-windows')};
+  const room={...editingRoom,name,target,area,design_indoor_c:design,design_indoor_reference:design===null?'':designRef,default_circuit_id:el('r-circuit').value||null,heat_load,temperature_sensors:temps,window_sensors:checked('r-windows')};
   return {room,emitters};
 }
 function applyRoom(next,room,emitters){
@@ -506,7 +536,7 @@ el('room-form').addEventListener('submit',async ev=>{
   ev.preventDefault();
   const draft=buildRoomDraft([]);if(!draft)return;
   const next=clone(cfg);applyRoom(next,draft.room,draft.emitters);
-  try{await saveConfig(next);roomDirty=false;el('room-editor').classList.add('hidden');editingRoom=null;notice('Konfiguration gespeichert.');showRooms();stats()}
+  try{await saveConfig(next);roomDirty=false;el('room-editor').classList.add('hidden');editingRoom=null;notice('Konfiguration gespeichert.');refreshRooms();stats()}
   catch(ex){notice('Nicht gespeichert: '+ex.message,true)}   // form stays open with all entries
 });
 el('cancel-room').addEventListener('click',()=>{if(roomDirty&&!confirm('Es gibt ungespeicherte Änderungen. Verwerfen?'))return;roomDirty=false;el('room-editor').classList.add('hidden');editingRoom=null});
@@ -516,7 +546,7 @@ async function deleteRoom(id){
   const next=clone(cfg);
   next.rooms=next.rooms.filter(r=>r.id!==id);next.emitters=next.emitters.filter(e=>e.room_id!==id);
   next.zones=next.zones.map(z=>({...z,room_ids:z.room_ids.filter(x=>x!==id)})).filter(z=>z.room_ids.length>=2);
-  try{await saveConfig(next);notice('Konfiguration gespeichert.');showRooms()}catch(ex){notice('Nicht gelöscht: '+ex.message,true)}
+  try{await saveConfig(next);notice('Konfiguration gespeichert.');refreshRooms()}catch(ex){notice('Nicht gelöscht: '+ex.message,true)}
 }
 
 /* ---------- 2 Zonen ---------- */
@@ -713,8 +743,11 @@ async function showCheck(){
   await loadReadiness();
   const m=el('measure-list');m.replaceChildren();
   if(!cfg.rooms.length){const p=document.createElement('p');p.textContent='Noch keine Räume angelegt.';m.append(p)}
+  await loadRoomsStatus();
+  if(roomsData&&cfg.rooms.length){const p=document.createElement('p');p.className='info-box';p.textContent=coverageText(roomsData.coverage)+'.';m.append(p)}
   for(const r of cfg.rooms){const item=document.createElement('div');item.className='item row';const n=document.createElement('span');n.textContent=r.name;
-    item.append(n,r.temperature_sensors.length?badge('Messbereit','good'):badge('Temperatursensor fehlt','bad'));m.append(item)}
+    const [text,kind]=roomStatus(r);item.append(n,badge(text,kind));m.append(item)}
+  await renderSessions();
   const root=el('readiness-list');root.replaceChildren();
   if(!readinessData){root.textContent='Prüfung derzeit nicht abrufbar.';return}
   const section=(title,blockers,ok)=>{
@@ -803,10 +836,56 @@ async function renderHeatSnapshot(){
   root.append(grid);
   const rooms=document.createElement('div');rooms.id='hs-rooms';
   for(const r of d.rooms){const row=document.createElement('div');row.className='item row';const n=document.createElement('span');n.textContent=r.name;
-    const t=r.temperature===null?badge('nicht überwacht','warn'):badge(r.temperature.toLocaleString('de-DE',{maximumFractionDigits:1})+' °C · Soll '+String(r.target).replace('.',',')+' °C');
+    const soll=' · Soll '+String(r.target).replace('.',',')+' °C';
+    const dev=r.deviation_k===null||r.deviation_k===undefined?'':' · '+(r.deviation_k>0?'+':r.deviation_k<0?'−':'±')+Math.abs(r.deviation_k).toLocaleString('de-DE',{maximumFractionDigits:1})+' K';
+    const t=r.temperature===null?badge(r.status_text+soll,RS_KIND[r.status]||''):badge(r.temperature.toLocaleString('de-DE',{maximumFractionDigits:1})+' °C'+soll+dev);
     row.append(n,t);if(r.window_open)row.append(badge('Fenster offen','warn'));rooms.append(row)}
   root.append(rooms);
   const a=document.createElement('a');a.href='api/v2/export.csv';a.textContent='Messwerte der letzten 7 Tage als CSV herunterladen';a.setAttribute('download','');root.append(a);
+}
+/* ---------- AB-013 Messauftrag ---------- */
+let sessionsData=null;
+async function renderSessions(){
+  const root=el('session-panel');if(!root)return;root.replaceChildren();
+  try{sessionsData=await api('v2/sessions')}catch(_){root.textContent='Messaufträge derzeit nicht abrufbar.';return}
+  const a=sessionsData.active;
+  if(a){
+    const box=document.createElement('div');box.className='item';box.id='session-active';
+    const b=document.createElement('b');b.textContent=a.name;
+    const days=Math.floor((Date.now()-new Date(a.started_at).getTime())/86400000)+1;
+    const p=document.createElement('p');p.textContent='Läuft seit '+dateText(a.started_at)+' · Tag '+Math.min(days,a.planned_days)+' von '+a.planned_days+(days>a.planned_days?' (geplante Dauer überschritten)':'')+'.';
+    const rooms=document.createElement('p');rooms.className='hint';
+    rooms.textContent='Überwacht: '+(a.rooms.filter(r=>r.sensors.length).map(r=>r.name).join(', ')||'–')+' · nicht überwacht: '+(a.rooms.filter(r=>!r.sensors.length).map(r=>r.name).join(', ')||'–');
+    const stop=document.createElement('button');stop.id='session-stop';stop.textContent='Messauftrag beenden';
+    stop.addEventListener('click',async()=>{if(!confirm('Messauftrag „'+a.name+'“ beenden? Die Messung selbst läuft weiter.'))return;
+      try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messauftrag beendet.');renderSessions()}catch(ex){notice(ex.message,true)}});
+    box.append(badge('Messauftrag läuft','good'),b,p,rooms,stop);root.append(box);
+  }else{
+    const form=document.createElement('div');form.className='item';form.id='session-form';
+    const monitored=cfg.rooms.filter(r=>r.temperature_sensors.length),others=cfg.rooms.filter(r=>!r.temperature_sensors.length);
+    const help=document.createElement('p');help.className='hint';help.textContent=(roomsData?.help||'')+' Die Auswahl ist ein Vorschlag, keine Pflicht.';
+    const sel=document.createElement('p');sel.textContent=monitored.length+' von '+cfg.rooms.length+' Räumen ausgewählt'+(others.length?'; '+others.length+' Räume werden nicht direkt überwacht ('+others.map(r=>r.name).join(', ')+')':'')+'.';
+    const hintList=document.createElement('ul');
+    for(const r of cfg.rooms){const h=roomsData?.hints?.[r.id]||[];if(!h.length)continue;const li=document.createElement('li');li.textContent=r.name+': '+h.join(' · ');hintList.append(li)}
+    const name=document.createElement('input');name.id='session-name';name.maxLength=80;name.placeholder='Bezeichnung, z. B. Pilot Anlage 1 (ohne Kundennamen)';
+    const days=document.createElement('input');days.id='session-days';days.inputMode='numeric';days.value='7';
+    const dl=document.createElement('label');dl.htmlFor='session-days';dl.textContent='Geplante Dauer in Tagen';
+    const nl=document.createElement('label');nl.htmlFor='session-name';nl.textContent='Bezeichnung des Messauftrags';
+    const cl=document.createElement('label');cl.className='check-row';const cb=document.createElement('input');cb.type='checkbox';cb.id='session-confirm';
+    cl.append(cb,document.createTextNode(' Auswahl der Messräume geprüft und bestätigt'));
+    const start=document.createElement('button');start.className='primary';start.id='session-start';start.textContent='Messauftrag starten';
+    start.disabled=!monitored.length;
+    start.addEventListener('click',async()=>{
+      const d=Number(days.value);
+      try{await api('v2/sessions/start','POST',{name:name.value.trim(),planned_days:Number.isInteger(d)?d:NaN,confirmed:cb.checked});notice('Messauftrag gestartet.');renderSessions();stats()}
+      catch(ex){notice('Messauftrag nicht gestartet: '+ex.message,true)}});
+    form.append(help,sel);if(hintList.children.length)form.append(hintList);
+    form.append(nl,name,dl,days,cl,start);
+    if(!monitored.length){const w=document.createElement('p');w.className='warn-box';w.textContent='Für einen Messauftrag mindestens einem Raum einen Temperaturfühler zuordnen.';form.append(w)}
+    root.append(form);
+  }
+  const done=sessionsData.sessions.filter(s=>s.ended_at);
+  if(done.length){const h=document.createElement('p');h.className='hint';h.textContent='Beendete Messaufträge: '+done.map(s=>s.name+' ('+dateText(s.started_at)+' – '+dateText(s.ended_at)+')').join('; ');root.append(h)}
 }
 async function stats(){
   try{const m=await api('overview');acquisitionStatus(m.acquisition||{});
@@ -828,7 +907,7 @@ async function boot(){
     cfg=await api('v2/config');saved=clone(cfg);
     try{catalog=(await api('v2/catalog')).valves}catch(_){catalog=[]}
     try{hsProfiles=(await api('v2/heat-source/profiles')).profiles}catch(_){hsProfiles=[]}
-    await loadReadiness();
+    await loadReadiness();await loadRoomsStatus();
     try{const d=await api('entities');entities=d.entities;notice(entities.length+' Home-Assistant-Entitäten geladen. Read-only.')}
     catch(ex){notice('HA-Entitäten derzeit nicht verfügbar: '+ex.message+' Bestehende Zuordnungen bleiben erhalten.',true)}
   }catch(ex){notice('Konfiguration nicht ladbar: '+ex.message,true)}

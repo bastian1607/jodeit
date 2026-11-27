@@ -88,7 +88,7 @@ class V2Browser(unittest.TestCase):
         for method, path in self.requests:
             self.assertTrue(path.startswith("/api/") or path in ("/", "/jodeit-logo.png"), path)
             if method == "POST":
-                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test"), path)
+                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop"), path)
 
     # ------------------------------------------------------------- helpers
     def v2(self):
@@ -179,7 +179,7 @@ class AcceptanceTests(V2Browser):
         self.assertEqual(set(room["temperature_sensors"]), {"sensor.wohnzimmer_t", "sensor.wohnzimmer_t2"})
         self.assertEqual(room["heat_load"]["status"], "missing")    # AC-01: no heat load needed
         self.assertEqual(self.v2()["emitters"], [])
-        expect(self.page.locator("#room-list")).to_contain_text("Messbereit")
+        expect(self.page.locator("#room-list")).to_contain_text("Fühler zugeordnet")
         # remove one window contact selectively, reload, check
         self.page.reload()
         self.edit_room("Wohnzimmer")
@@ -198,10 +198,50 @@ class AcceptanceTests(V2Browser):
         self.open()
         self.tab("1 Räume")
         self.page.get_by_role("button", name="+ Raum anlegen").click()
-        self.page.fill("#r-name", "Wohnzimmer")
+        self.page.fill("#r-target", "23")
         self.save_room(ok=False)
-        expect(self.page.locator("#notice")).to_contain_text("Für Wohnzimmer fehlt noch ein Temperatursensor")
+        expect(self.page.locator("#notice")).to_contain_text("Bitte einen Raumnamen eingeben")
+        self.page.locator("#sec-heat-load summary").click()
+        self.page.fill("#r-design", "20")
+        self.save_room(ok=False)
+        expect(self.page.locator("#notice")).to_contain_text("Quelle der Auslegungs-Innentemperatur")
         self.assertEqual(self.v2()["rooms"], [])
+
+    def test_ab013_room_without_sensor_and_coverage(self):
+        """AC-013-01/04/06: Bad ohne Fühler speicherbar, nicht überwacht, Abdeckung sichtbar."""
+        self.seed(rooms=("Wohnzimmer",))
+        self.open()
+        self.tab("1 Räume")
+        self.page.get_by_role("button", name="+ Raum anlegen").click()
+        self.page.fill("#r-name", "Bad")
+        self.page.fill("#r-target", "23")
+        self.save_room()
+        room = self.v2()["rooms"][1]
+        self.assertEqual((room["name"], room["target"], room["temperature_sensors"], room["design_indoor_c"]), ("Bad", 23, [], None))
+        item = self.page.locator("#room-list .item", has_text="Bad")
+        expect(item).to_contain_text("Nicht überwacht")
+        expect(item).to_contain_text("Höheres Komfortziel")
+        expect(self.page.locator("#coverage-line")).to_contain_text("1 von 2 Räumen mit Temperaturfühler")
+        expect(self.page.locator("#coverage-line")).to_contain_text("nicht überwacht: Bad")
+        self.page.reload()
+        self.tab("1 Räume")
+        expect(self.page.locator("#room-list")).to_contain_text("Bad")
+        # Messauftrag: Auswahl bestätigen, starten, beenden – nur lokal
+        self.tab("5 Prüfen & Messung")
+        form = self.page.locator("#session-form")
+        expect(form).to_contain_text("1 von 2 Räumen ausgewählt")
+        expect(form).to_contain_text("Bad")
+        self.page.fill("#session-name", "Pilot Anlage 1")
+        self.page.click("#session-start")
+        expect(self.page.locator("#notice")).to_contain_text("bitte bestätigen")
+        self.page.check("#session-confirm")
+        self.page.click("#session-start")
+        expect(self.page.locator("#session-active")).to_contain_text("Tag 1 von 7")
+        expect(self.page.locator("#session-active")).to_contain_text("nicht überwacht: Bad")
+        self.page.once("dialog", lambda d: d.accept())
+        self.page.click("#session-stop")
+        expect(self.page.locator("#session-form")).to_be_visible()
+        self.shot("ab013-raeume-messauftrag")
 
     def test_ac03_zones(self):
         self.seed()
@@ -393,6 +433,7 @@ class AcceptanceTests(V2Browser):
     def complete_two_emitters(self, exponent="1,3"):
         cfg = self.seed()
         cfg["circuits"][0].update(design_flow_c=55, design_return_c=45)
+        cfg["rooms"][0].update(design_indoor_c=20, design_indoor_reference="Heizlastberechnung Test")
         self.put_v2(cfg)
         self.open()
         self.edit_room("Wohnzimmer")
@@ -440,7 +481,7 @@ class AcceptanceTests(V2Browser):
         self.seed(rooms=("Wohnzimmer",))
         self.open()
         self.tab("5 Prüfen & Messung")
-        expect(self.page.locator("#measure-list")).to_contain_text("Messbereit")
+        expect(self.page.locator("#measure-list")).to_contain_text("Fühler zugeordnet")
         box = self.page.locator("#readiness-list .item", has_text="Wohnzimmer")
         expect(box).to_contain_text("Angaben für Abgleich fehlen")
         box.get_by_role("button", name="→ Heizlast fehlt").click()
@@ -454,6 +495,7 @@ class AcceptanceTests(V2Browser):
         cfg = self.v2()
         cfg["building"].update(heating_system="radiators", design_outdoor_c=-12)
         cfg["circuits"][0].update(design_flow_c=55, design_return_c=45)
+        cfg["rooms"][0].update(design_indoor_c=20, design_indoor_reference="Berechnung")
         cfg["rooms"][0]["heat_load"] = {"status": "adopted", "value_w": 1400, "method": "DIN EN 12831-1", "reference": "Berechnung",
                                         "author": "", "date": "2026-10-01", "legacy_value_w": None}
         e = model._emitter_from_v1({"name": "HK", "power_w": 1500}, "wohnzimmer", "hk1")

@@ -162,6 +162,8 @@ def from_v1(v1):
             "area": _num(room.get("area")),
             "default_circuit_id": DEFAULT_CIRCUIT_ID,
             "heat_load": heat_load,
+            "design_indoor_c": None,
+            "design_indoor_reference": "",
             "temperature_sensors": _list(room.get("temperature_sensors")),
             "window_sensors": _list(room.get("window_sensors")),
         })
@@ -275,6 +277,8 @@ def merge_v1(current, v1):
             "area": _num(v1_room.get("area")),
             "default_circuit_id": old["default_circuit_id"] if old else default_circuit,
             "heat_load": copy.deepcopy(old["heat_load"]) if old else empty_heat_load(),
+            "design_indoor_c": old.get("design_indoor_c") if old else None,
+            "design_indoor_reference": old.get("design_indoor_reference", "") if old else "",
             "temperature_sensors": _list(v1_room.get("temperature_sensors")),
             "window_sensors": _list(v1_room.get("window_sensors")),
         }
@@ -464,8 +468,12 @@ def _validate_room(room, circuit_ids):
             _check_entity(value, {domain}, key)
         if len(set(values)) != len(values):
             _fail("Entität doppelt zugeordnet")
-    if not room["temperature_sensors"]:
-        _fail("Mindestens ein Temperatursensor pro Raum")
+    # AB-013: a room may have no sensor at all ("nicht überwacht"); it keeps its comfort target.
+    # Design indoor temperature is separate from the comfort target and never derived from it.
+    if _check_number(room.get("design_indoor_c"), 5, 35, "Auslegungs-Innentemperatur") is not None:
+        _check_text(room.get("design_indoor_reference", ""), "Quelle Auslegungs-Innentemperatur", required=True)
+    else:
+        _check_text(room.get("design_indoor_reference", "") or "", "Quelle Auslegungs-Innentemperatur")
 
 
 def _validate_emitter(emitter, room_ids, circuit_ids):
@@ -589,6 +597,8 @@ def calculation_blockers(cfg):
             reasons.append("Keine Heizfläche erfasst")
         if any(e["rated_output"].get("flow_c") is None or e["rated_output"].get("value_w") is None for e in emitters):
             reasons.append("Heizkörperleistung ohne Referenztemperaturen")
+        if emitters and room.get("design_indoor_c") is None:
+            reasons.append("Auslegungs-Innentemperatur fehlt")
         if len(emitters) > 1 and any(e.get("load_share_percent") is None for e in emitters):
             reasons.append("Heizlastanteile der Heizflächen fehlen")
         circuits = {c["id"]: c for c in cfg["circuits"]}
@@ -639,6 +649,8 @@ def readiness(cfg):
             elif e["rated_output"].get("value_w") is None or e["rated_output"].get("flow_c") is None:
                 blockers.append(_blocker("output_reference_missing", f"{e['name']}: Heizkörperleistung ohne Referenztemperaturen",
                                          room_id=room["id"], emitter_id=e["id"], section="emitter"))
+        if emitters and room.get("design_indoor_c") is None:
+            blockers.append(_blocker("design_indoor_missing", "Auslegungs-Innentemperatur fehlt", room_id=room["id"], section="heat_load"))
         if len(emitters) > 1 and any(e.get("load_share_percent") is None for e in emitters):
             blockers.append(_blocker("shares_missing", "Heizlastanteile der Heizflächen fehlen", room_id=room["id"], section="emitters"))
         for circuit_id in sorted({e["circuit_id"] for e in emitters}):
@@ -673,7 +685,10 @@ def suggest_load_shares(cfg, room_id):
     if len(emitters) == 1:
         return {emitters[0]["id"]: 100.0}, None
     circuits = {c["id"]: c for c in cfg["circuits"]}
-    design_room = room.get("target")
+    # AB-013 (AC-013-10/17): the comfort target is never a substitute for the design indoor temperature.
+    design_room = room.get("design_indoor_c")
+    if design_room is None:
+        return None, "Auslegungs-Innentemperatur fehlt (die Komfort-Solltemperatur wird nicht ersatzweise verwendet)"
     outputs = []
     for e in emitters:
         if e.get("type") == "underfloor":

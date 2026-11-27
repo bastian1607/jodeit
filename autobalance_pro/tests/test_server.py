@@ -12,10 +12,11 @@ class ConfigTests(unittest.TestCase):
         self.tmp.cleanup()
     def test_empty(self):
         self.assertEqual(server.load()["rooms"],[])
-    def test_sensor_required(self):
+    def test_room_without_sensor_allowed(self):
+        # AB-013: a room without sensor is valid ("nicht überwacht").
         d=server.empty()
         d["rooms"]=[{"id":"a","name":"Bad","target":22,"temperature_sensors":[],"window_sensors":[],"radiators":[]}]
-        with self.assertRaises(ValueError):server.validate(d)
+        server.validate(d)
     def test_zone(self):
         d=server.empty()
         d["rooms"]=[{"id":v,"name":v,"target":21,"temperature_sensors":["sensor."+v],"window_sensors":[],"radiators":[]} for v in ("a","b")]

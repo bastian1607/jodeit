@@ -1,7 +1,7 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
 import json,sys,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
-import model,coverage,devices
+import model,coverage,devices,monitoring,uuid
 from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -37,7 +37,17 @@ def setup():
         # AB-020: app starts are logged so a gap can be related to a restart. Additive table.
         c.execute("CREATE TABLE IF NOT EXISTS app_events (id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT)")
         c.execute("CREATE INDEX IF NOT EXISTS samples_entity_at ON samples(entity_id,at)")
+        # AB-013: every saved configuration is kept with its timestamp, so sensor assignments and
+        # comfort targets can be evaluated as they were at measuring time (additive table).
+        c.execute("CREATE TABLE IF NOT EXISTS config_history (id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL)")
+        # AB-013/AB-020: a measuring job (Messauftrag) delimits the evaluated time window per site.
+        c.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, name TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT, planned_days INTEGER NOT NULL, rooms TEXT NOT NULL, note TEXT)")
     sync_config()
+    with LOCK, connect() as c:
+        if not c.execute("SELECT 1 FROM config_history LIMIT 1").fetchone():
+            # Baseline for installations before AB-013: valid since the first stored sample.
+            first=c.execute("SELECT MIN(at) FROM samples").fetchone()[0]
+            c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(first or utcnow().isoformat(),"baseline",json.dumps(load_v2(),ensure_ascii=False)))
 
 def backup_database(reason):
     """Consistent copy via the SQLite backup API (safe with WAL), stored next to the DB."""
@@ -102,6 +112,7 @@ def save_v2(cfg):
         previous=load_v2()
         with connect() as c:
             _write_config(c,cfg)
+            c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(utcnow().isoformat(),"save",json.dumps(cfg,ensure_ascii=False)))
             if wanted(previous)!=wanted(cfg) or temperature_ids(previous)!=temperature_ids(cfg):
                 c.execute("DELETE FROM acquisition")
     return cfg
@@ -127,7 +138,7 @@ def validate(d):
     for r in d["rooms"]:
         if not isinstance(r,dict) or not isinstance(r.get("id"),str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}",r["id"]) or r["id"] in ids or not isinstance(r.get("name"),str) or not r["name"].strip():raise ValueError("Raum-ID/Name fehlt oder doppelt")
         ids.add(r["id"])
-        if not isinstance(r.get("temperature_sensors"),list) or not r["temperature_sensors"]:raise ValueError("Mindestens ein Temperatursensor pro Raum")
+        if not isinstance(r.get("temperature_sensors"),list):raise ValueError("Temperatursensorliste ungültig")  # AB-013: 0 sensors allowed
         if not isinstance(r.get("window_sensors"),list) or not isinstance(r.get("radiators"),list) or len(r["radiators"])>100:raise ValueError("Fenster-/Heizkörperliste ungültig")
         number(r.get("target",21),5,35,"Raum-Solltemperatur")
         for key,limit in (("heat_load",50000),("area",1000)):
@@ -265,14 +276,7 @@ def heat_source_snapshot(now=None):
     def value(o):
         if not o:return None
         return o["normalized_value"] if o.get("normalized_value") is not None else o["state"]
-    rooms=[]
-    for r in cfg["rooms"]:
-        temps=[obs.get(e) for e in r.get("temperature_sensors",[])]
-        valid=[o["normalized_value"] for o in temps if o and o["valid"] and o.get("normalized_value") is not None]
-        windows=[obs.get(e) for e in r.get("window_sensors",[])]
-        rooms.append({"id":r["id"],"name":r["name"],"target":r.get("target"),
-            "temperature":round(sum(valid)/len(valid),2) if valid else None,"sensors":len(r.get("temperature_sensors",[])),
-            "window_open":any(o and o["state"]=="on" for o in windows),"monitored":bool(valid)})
+    rooms=[monitoring.room_status(r,obs) for r in cfg["rooms"]]
     items=[]
     for sid,f in fields.items():
         o=obs.get(sid)
@@ -296,6 +300,81 @@ def export_csv(hours=168,now=None):
         for at,eid,st,unit,q,nv,nu in c.execute("SELECT at,entity_id,state,unit,quality,normalized_value,normalized_unit FROM samples WHERE at>=? ORDER BY at,entity_id",(start,)):
             if eid in desired:w.writerow([at,eid,labels.get(eid,""),st,"" if nv is None else nv,nu or unit or "",q or "unchecked"])
     return buf.getvalue()
+
+def rooms_status(now=None):
+    """AB-013: monitoring status per room, coverage, critical room and reference hints."""
+    cfg=load_v2();obs={o["entity_id"]:o for o in latest_observations(now)}
+    statuses=[monitoring.room_status(r,obs) for r in cfg["rooms"]]
+    return {"rooms":statuses,"coverage":monitoring.coverage_summary(cfg,statuses),
+        "critical_room":monitoring.critical_room(statuses),"hints":monitoring.reference_hints(cfg),
+        "help":monitoring.REFERENCE_HELP,"disagree_k":monitoring.DISAGREE_K}
+
+def config_history(start=None,end=None):
+    """[(at, cfg)] ascending; includes the last version before ``start`` so the state at start is known."""
+    with connect() as c:
+        rows=c.execute("SELECT at,value FROM config_history ORDER BY id").fetchall()
+    out=[(at,json.loads(v)) for at,v in rows]
+    if start:
+        before=[x for x in out if x[0]<=start]
+        out=(before[-1:] if before else [])+[x for x in out if x[0]>start]
+    if end:out=[x for x in out if x[0]<=end]
+    return out
+
+def target_changes(start=None,end=None):
+    """AB-013 AC-013-08: comfort-target and design-temperature changes per room with timestamp."""
+    changes=[];previous={}
+    for at,cfg in config_history(start,end):
+        for r in cfg.get("rooms",[]):
+            cur=(r.get("target"),r.get("design_indoor_c"))
+            old=previous.get(r["id"])
+            if old is not None and old!=cur:
+                changes.append({"at":at,"room_id":r["id"],"room":r.get("name"),"target_from":old[0],"target_to":cur[0],"design_from":old[1],"design_to":cur[1]})
+            previous[r["id"]]=cur
+    return changes
+
+SESSION_NAME=re.compile(r"^[^<>]{1,80}$")
+def _session_row(r):
+    keys=("id","name","started_at","ended_at","planned_days","rooms","note")
+    d=dict(zip(keys,r));d["rooms"]=json.loads(d["rooms"]);return d
+
+def list_sessions():
+    with connect() as c:rows=c.execute("SELECT id,name,started_at,ended_at,planned_days,rooms,note FROM sessions ORDER BY started_at DESC").fetchall()
+    sessions=[_session_row(r) for r in rows]
+    return {"active":next((s for s in sessions if not s["ended_at"]),None),"sessions":sessions}
+
+def get_session(sid):
+    with connect() as c:r=c.execute("SELECT id,name,started_at,ended_at,planned_days,rooms,note FROM sessions WHERE id=?",(sid,)).fetchone()
+    return _session_row(r) if r else None
+
+def start_session(data,now=None):
+    """Start a measuring job. Local bookkeeping only – nothing is sent to HA or the heat pump."""
+    if not isinstance(data,dict):raise ValueError("Angaben fehlen")
+    name=data.get("name")
+    if not isinstance(name,str) or not SESSION_NAME.fullmatch(name.strip()):raise ValueError("Bezeichnung des Messauftrags fehlt (max. 80 Zeichen)")
+    days=data.get("planned_days",7)
+    if isinstance(days,bool) or not isinstance(days,int) or not 1<=days<=31:raise ValueError("Geplante Dauer 1–31 Tage")
+    if data.get("confirmed") is not True:raise ValueError("Auswahl der Messräume bitte bestätigen")
+    note=data.get("note") or ""
+    if not isinstance(note,str) or len(note)>500:raise ValueError("Notiz ungültig")
+    with LOCK:
+        cfg=load_v2();hints=monitoring.reference_hints(cfg)
+        rooms=[{"id":r["id"],"name":r["name"],"target":r.get("target"),"sensors":list(r.get("temperature_sensors",[])),
+                "window_sensors":list(r.get("window_sensors",[])),"hints":hints.get(r["id"],[])} for r in cfg["rooms"]]
+        if not any(r["sensors"] for r in rooms):raise ValueError("Mindestens ein Raum mit Temperaturfühler ist für einen Messauftrag nötig")
+        if list_sessions()["active"]:raise ValueError("Es läuft bereits ein Messauftrag")
+        sid="ma_"+uuid.uuid4().hex[:12];at=(now or utcnow()).isoformat()
+        with connect() as c:c.execute("INSERT INTO sessions(id,name,started_at,planned_days,rooms,note) VALUES(?,?,?,?,?,?)",(sid,name.strip(),at,days,json.dumps(rooms,ensure_ascii=False),note.strip()))
+    log_event("session_start",sid)
+    return get_session(sid)
+
+def stop_session(sid,now=None):
+    with LOCK:
+        s=get_session(sid) if isinstance(sid,str) else None
+        if not s:raise ValueError("Messauftrag nicht gefunden")
+        if s["ended_at"]:raise ValueError("Messauftrag ist bereits beendet")
+        with connect() as c:c.execute("UPDATE sessions SET ended_at=? WHERE id=?",((now or utcnow()).isoformat(),sid))
+    log_event("session_stop",sid)
+    return get_session(sid)
 
 def log_event(kind,detail=None):
     with connect() as c:c.execute("INSERT INTO app_events(at,kind,detail) VALUES(?,?,?)",(utcnow().isoformat(),kind,detail))
@@ -384,6 +463,9 @@ class API(BaseHTTPRequestHandler):
             return self.send_json(200,{"sources":devices.SOURCES,"write_enabled":devices.WRITE_ENABLED,
                 "profiles":[{"key":p["key"],"label":p["label"],"verified":p["verified"],"fields":len(p["fields"])} for p in devices.PROFILES.values()]})
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
+        if path=="/api/v2/rooms/status":return self.send_json(200,rooms_status())
+        if path=="/api/v2/sessions":return self.send_json(200,list_sessions())
+        if path=="/api/v2/target-changes":return self.send_json(200,{"changes":target_changes()})
         if path=="/api/v2/export.csv":
             body=("\ufeff"+export_csv()).encode()
             self.send_response(200)
@@ -403,12 +485,14 @@ class API(BaseHTTPRequestHandler):
         return self.send_json(404,{"error":"Nicht gefunden"})
     def do_POST(self):
         path=urlsplit(self.path).path
-        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion","/api/v2/heat-source/test"):return self.send_json(404,{"error":"Nicht gefunden"})
+        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion","/api/v2/heat-source/test","/api/v2/sessions/start","/api/v2/sessions/stop"):return self.send_json(404,{"error":"Nicht gefunden"})
         limit=100000 if path=="/api/config" else 500000
         try:
             size=int(self.headers.get("Content-Length","0"))
             if not 1<=size<=limit:return self.send_json(413,{"error":"Ungültige Datenlänge"})
             data=json.loads(self.rfile.read(size))
+            if path=="/api/v2/sessions/start":return self.send_json(200,start_session(data))
+            if path=="/api/v2/sessions/stop":return self.send_json(200,stop_session(data.get("id") if isinstance(data,dict) else None))
             if path=="/api/v2/heat-source/test":
                 # Read-only probe of the unsaved selection; stores nothing, sends nothing to the device.
                 if not isinstance(data,dict):raise ValueError("Datenquelle fehlt")
