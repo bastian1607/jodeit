@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.2.1
+# Jodeit AutoBalance Pro v0.3.0
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -18,6 +18,23 @@
 5. Räume, Sensoren, Fensterkontakte, Heizkörper und thermische Zonen einrichten. BBQKees/EMS-ESP-Messwerte sind auswählbar, sofern sie als HA-Entitäten vorhanden sind.
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
+
+## Änderungen in v0.3.0 (freigegeben 27.11.2026)
+
+Weiterhin rein lesend: keine Steuerbefehle an Wärmepumpe, Ventile oder Home Assistant.
+
+- AB-020: Messlücken über 15 Minuten werden erkannt, in Schritt 5 („Datenabdeckung der letzten 7 Tage“) und
+  bei Unterbrechung als Banner angezeigt; Abdeckung je Entität ab ihrer ersten Messung. Neue Endpunkte
+  `GET api/v2/data-quality`, `/health` mit Messstatus, `/health/acquisition` (503 nur, wenn die eigene
+  Messschleife > 60 min keinen Versuch gemacht hat). Neue Tabelle `app_events` (App-Start/-Stopp), Index
+  `samples(entity_id, at)`; beides additiv.
+- AB-015: Lesendes Geräteprofil „Buderus · BBQKees/EMS-ESP · Regler HMC310 · Heizkreis 1“ (30 Werte:
+  Heizkurve, Vorlauf-Soll, Vorlauf/Rücklauf, Außentemperatur, Betrieb, Warmwasser, Desinfektion, Störung).
+  Quelle Home Assistant (MQTT) oder EMS-ESP direkt per REST (nur `GET /api/thermostat|boiler`, nur lokale
+  Adressen). Einstellung in Schritt 3, Übersicht „Wärmepumpe und Räume · nur lesen“, CSV-Export
+  (`api/v2/export.csv`). `WRITE_ENABLED=False`, Sperrliste für Schreibpfade.
+- AB-021: Raum, Heizfläche und Zone lassen sich auch über `http://<LAN-IP>` anlegen (Ersatz für
+  `crypto.randomUUID()` in unsicheren Browserkontexten).
 
 ## Änderungen in v0.2.1 (freigegeben 26.11.2026)
 

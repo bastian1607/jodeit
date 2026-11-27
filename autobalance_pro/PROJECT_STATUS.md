@@ -1,10 +1,17 @@
 # AutoBalance Pro – überprüfter Projektstatus
-**Stichtag: 26.11.2026** · Dokumentationssnapshot, keine neue Funktionsfreigabe.
+**Stichtag: 27.11.2026** · Dokumentationssnapshot, keine neue Funktionsfreigabe.
 
 ## Quellen
 
 - Code: [bastian1607/jodeit – autobalance_pro](https://github.com/bastian1607/jodeit/tree/main/autobalance_pro), maßgeblich ist `main`.
 - Outline: [Pilotplanung](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD) · [Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS) · [AB-008 Datenmodell v2](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt) · [AB-009 Oberfläche](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-009-ubergabe-an-chatgpt-oberflache-fur-datenmodell-v2-wF0mbKy2cy) · [Zusammenarbeit](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM); Kurzregeln: [CLAUDE.md](CLAUDE.md).
+
+## Stand v0.3.0 (Release freigegeben von Bastian am 27.11.2026)
+
+- AB-020 (PR #10): Messlücken erkennen und anzeigen, Datenabdeckung je Entität, `/health/acquisition`.
+- AB-015 (PR #11): lesendes Geräteprofil Buderus/EMS-ESP HMC310, Quelle HA (MQTT) oder EMS-ESP REST (nur GET), Übersicht „Wärmepumpe und Räume“, CSV-Export.
+- AB-021 (PR #12): ID-Erzeugung auch in unsicheren Browserkontexten (`http://`).
+- Tests: 100 lokale Tests inkl. Chromium. Offen: externer Wächter (AB-020 AC-04), Messsessions/Bericht, Räume ohne Fühler (AB-013), Kurvenmodell HMC310 (ChatGPT Auftrag 4).
 
 ## Stand v0.2.1 (Release freigegeben von Bastian am 26.11.2026)
 
