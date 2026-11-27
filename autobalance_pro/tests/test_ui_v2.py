@@ -231,23 +231,29 @@ class AcceptanceTests(V2Browser):
         form = self.page.locator("#session-form")
         expect(form).to_contain_text("Gemessen werden 1 von 2 Räumen")
         expect(form).to_contain_text("nicht überwacht: Bad")
+        # AC6-05: sensor IDs with freshness and an explicit check before the job can start
+        review = self.page.locator("#session-sensor-review")
+        expect(review).to_contain_text("Wohnzimmer: sensor.")
+        expect(review).to_contain_text("Nicht überwacht: Bad")
+        expect(self.page.locator("#session-start")).to_be_disabled()
+        self.page.check("#session-confirm")
+        expect(review).to_contain_text("Ich habe Sensorzuordnung, Aufstellorte und nicht überwachte Räume geprüft")
         self.page.click("#session-start")
         expect(self.page.locator("#notice")).to_contain_text("Bitte eine Bezeichnung eingeben")
         self.page.fill("#session-name", "Müller · Angebot 2026-123 <Test>")
         self.page.fill("#session-note", "Schlüssel beim Nachbarn")
-        dialogs = []
-        self.page.once("dialog", lambda d: (dialogs.append(d.message), d.accept()))
         self.page.click("#session-start")
         active = self.page.locator("#session-active")
         expect(active).to_contain_text("Müller · Angebot 2026-123 <Test>")
         expect(active).to_contain_text("Tag 1 von 7")
         expect(active).to_contain_text("Notiz: Schlüssel beim Nachbarn")
-        self.assertIn("Nicht überwacht: Bad", dialogs[0])
         self.tab("Übersicht")
         expect(self.page.locator("#measurement-quick")).to_contain_text("Messung läuft: Müller")
-        self.page.once("dialog", lambda d: d.accept())
+        dialogs = []
+        self.page.once("dialog", lambda d: (dialogs.append(d.message), d.accept()))
         self.page.click("#quick-stop")
         expect(self.page.locator("#quick-start")).to_be_visible()
+        self.assertIn("Die gesonderte Ablage in der Kundenakte muss bestätigt werden.", dialogs[0])
         self.page.click("#quick-start")
         expect(self.page.locator("#session-form")).to_be_visible()
         history = self.page.locator("#session-history")
@@ -609,21 +615,22 @@ class AcceptanceTests(V2Browser):
             cfg["circuits"][0]["entities"]["flow"] = "sensor.vl"
             self.put_v2(cfg)
         with patch.object(server, "utcnow", return_value=start):
-            server.start_session({"name": "Pilot Anlage 1", "confirmed": True})
+            job = server.start_session({"name": "Pilot Anlage 1", "confirmed": True})
         with sqlite3.connect(server.DB) as c:
             t = start
             while t < datetime.now(timezone.utc):
                 for eid, v in (("sensor.aussen", 2.0), ("sensor.vl", 40.0), ("sensor.wohnzimmer_t", 20.7)):
-                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value) VALUES(?,?,?,?,?,?,?)",
-                              (t.isoformat(), eid, str(v), "°C", 1, "ok", v))
+                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value,session_id) VALUES(?,?,?,?,?,?,?,?)",
+                              (t.isoformat(), eid, str(v), "°C", 1, "ok", v, job["id"]))
                 t += timedelta(minutes=5)
         self.open()
         self.tab("5 Prüfen & Messung")
         stage = self.page.locator("#assessment-stage")
-        expect(stage).to_contain_text("Niveau im Messbereich prüfbar")
+        expect(stage).to_contain_text("Heizbetrieb nicht nachgewiesen")     # HA-only config (AC6-02)
         expect(stage).to_contain_text("vorläufig")
         expect(self.page.locator("#assessment-basis")).to_contain_text("Abtauung nicht erkennbar")
-        expect(self.page.locator("#assessment-nights")).to_contain_text("geeignet")
+        expect(self.page.locator("#assessment-nights")).to_contain_text("technisch auswertbar · Heizbetrieb nicht nachgewiesen")
+        expect(self.page.locator("#assessment-restricted")).to_have_count(0)      # unverified: no level statement to restrict
         expect(self.page.locator("#assessment")).to_contain_text("Bad nicht überwacht")
         content = self.page.content()
         for forbidden in ("Offset auf", "Heizkurve anheben", "Empfehlung übernehmen"):
@@ -633,7 +640,7 @@ class AcceptanceTests(V2Browser):
         with self.page.expect_popup() as popup:
             self.page.click("#report-link")
         report = popup.value
-        expect(report.locator("#report-result")).to_contain_text("Niveau im Messbereich prüfbar")
+        expect(report.locator("#report-result")).to_contain_text("Heizbetrieb nicht nachgewiesen")
         expect(report.locator("body")).to_contain_text("Nicht überwachte Räume: Bad")
         if os.environ.get("AUTO_BALANCE_SCREENSHOTS"):
             report.screenshot(path=str(Path(os.environ["AUTO_BALANCE_SCREENSHOTS"]) / "ab020-messbericht.png"), full_page=True)

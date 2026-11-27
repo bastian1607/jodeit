@@ -44,8 +44,8 @@ class ReportTests(unittest.TestCase):
             for t in plant.ticks:
                 for eid in ("sensor.out", "sensor.vl", "sensor.wz", "binary_sensor.f_wz"):
                     x = plant.values[t][eid]
-                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value) VALUES(?,?,?,?,?,?,?)",
-                              (t.isoformat(), eid, x["s"], "", 1, "ok", x["v"]))
+                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value,session_id) VALUES(?,?,?,?,?,?,?,?)",
+                              (t.isoformat(), eid, x["s"], "", 1, "ok", x["v"], self.job["id"]))
 
     def test_ac06_insufficient_after_seven_days_with_outage(self):
         p = Plant(days=7)
@@ -68,9 +68,9 @@ class ReportTests(unittest.TestCase):
         p = Plant(days=4)
         self.store(p)
         html = server.session_report(self.job["id"], now=p.end)
-        self.assertIn("Niveau im Messbereich prüfbar", html)
+        self.assertIn("Heizbetrieb nicht nachgewiesen", html)      # HA-only config, AC6-02
         self.assertIn("läuft noch – Ergebnis vorläufig", html)
-        self.assertIn("Steigung und Frostverhalten nicht nachgewiesen", html)
+        self.assertIn("Vorläufiger Bericht einer laufenden Messung", html)
         self.assertIn("Keine Messlücken über 15 Minuten", html)
 
     def test_job_without_data_reports_whole_window_as_gap(self):

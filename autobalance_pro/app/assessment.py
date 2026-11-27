@@ -37,14 +37,21 @@ THRESHOLDS = {
 }
 SLOT = timedelta(minutes=THRESHOLDS["slot_minutes"])
 
+RESTRICTED_LABEL = "Vorläufig · fachlich eingeschränkt"
 STAGE_TEXT = {
     "no_data": "Keine Messdaten in dieser Messung",
     "insufficient": "Messung unzureichend – keine Heizkurvenempfehlung",
+    "unverified": "Heizbetrieb nicht nachgewiesen. Temperaturdaten vorhanden, aber keine belastbare Heizkurvenbewertung.",
     "level": "Niveau im Messbereich prüfbar – Steigung nicht beurteilbar",
     "level_and_slope": "Niveau und Steigung in den Messbereichen prüfbar (nur Technikerprüfung)",
 }
 
 DHW_WORDS = ("hot water", "warmwasser", "dhw")
+HEATING_WORDS = ("heating", "heizen", "heizbetrieb")
+UNKNOWN_STATES = ("", "unknown", "unavailable", "none")
+# Share of usable 5-min slots in a night's evaluation window that must carry a valid status signal
+# (pilot value, ChatGPT review Auftrag 7: "frische, valide Statusmessungen über den Nachtabschnitt").
+STATUS_SHARE = 0.8
 DEFROST_WORDS = ("defrost", "abtau")
 
 
@@ -183,6 +190,14 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         outdoor = _num(row.get(outdoor_role)) if outdoor_role else None
         outdoor_raw = _num(row.get(roles["outdoor"])) if roles.get("outdoor") else None
         flow = next((_num(row.get(f)) for f in flow_roles if _num(row.get(f)) is not None), None)
+        # AC6-02: heating must be confirmed by a valid status value, an assigned entity is not enough.
+        heat_state = _state(row.get(roles["heating_active"])) if roles.get("heating_active") else ""
+        activity = _state(row.get(roles["hp_activity"])) if roles.get("hp_activity") else ""
+        activity_known = activity not in UNKNOWN_STATES
+        heating_confirmed = heat_state == "on" or (heat_state in UNKNOWN_STATES and any(w in activity for w in HEATING_WORDS))
+        dhw_state = _state(row.get(roles["dhw"])) if roles.get("dhw") else ""
+        dhw_known = dhw_state in ("on", "off") or activity_known
+        disturbances_known = dhw_known and activity_known      # defrost is only visible via the activity
         rooms = {}
         for r in cfg.get("rooms", []):
             sensors = r.get("temperature_sensors", [])
@@ -204,7 +219,7 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         else:
             state = "ok"
         tick_info[t] = {"state": state, "reasons": reasons, "outdoor": outdoor, "outdoor_raw": outdoor_raw,
-                        "rooms": rooms}
+                        "rooms": rooms, "heating": heating_confirmed, "disturbances_known": disturbances_known}
 
     # ---- slots and nights (local time)
     slots = []
@@ -248,7 +263,11 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
             outdoor = [tick_info[t]["outdoor"] for t in ok_ticks]
             outdoor_raw = [tick_info[t]["outdoor_raw"] for t in ok_ticks if tick_info[t]["outdoor_raw"] is not None]
             reasons = sorted({r for s in ns if s[1] for r in tick_info[s[1]]["reasons"]})
+            in_window = [t for t in ok_ticks if best and best[0] <= t < best[1]]
+            share = lambda key: (sum(1 for t in in_window if tick_info[t][key]) / len(in_window)) if in_window else 0.0
             nights.append({
+                "heating_verified": best is not None and share("heating") >= STATUS_SHARE,
+                "disturbances_verified": best is not None and share("disturbances_known") >= STATUS_SHARE,
                 "date": (day - timedelta(days=1)).isoformat(), "start": n_start.isoformat(), "end": n_end.isoformat(),
                 "valid": best is not None, "valid_window": [best[0].isoformat(), best[1].isoformat()] if best else None,
                 "ok_hours": round(len(ok_ticks) * th["slot_minutes"] / 60, 1),
@@ -262,7 +281,9 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
     for n in nights:
         n["segment"] = max(i for i, b in enumerate(boundaries) if b <= max(n["_end"] - SLOT, start))
     current_segment = len(boundaries) - 1
-    current = [n for n in nights if n["segment"] == current_segment and n["valid"]]
+    valid_current = [n for n in nights if n["segment"] == current_segment and n["valid"]]
+    # Only nights with confirmed heating operation count for level and slope (AC6-02).
+    current = [n for n in valid_current if n["heating_verified"]]
 
     # ---- technical coverage of essential entities, counted only while assigned (AC-09)
     assigned = {}
@@ -331,8 +352,16 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         elif low:
             reasons.append("Technische Abdeckung unter "
                            f"{round(th['technical_coverage'] * 100)} % bei: " + ", ".join(c["entity_id"] for c in low) + ".")
+        elif len(valid_current) < th["nights_level"]:
+            reasons.append(f"Nur {len(valid_current)} geeignete Nächte (mindestens {th['nights_level']} nötig).")
         elif len(current) < th["nights_level"]:
-            reasons.append(f"Nur {len(current)} geeignete Nächte (mindestens {th['nights_level']} nötig).")
+            stage = "unverified"
+            if not roles.get("heating_active") and not roles.get("hp_activity"):
+                reasons.append("Kein Betriebsstatus der Wärmepumpe zugeordnet – Heizbetrieb nicht nachweisbar. "
+                               "Geräteprofil oder Heizbetriebs-Entität zuordnen.")
+            else:
+                reasons.append(f"Nur {len(current)} von {len(valid_current)} technisch auswertbaren Nächten mit nachgewiesenem "
+                               "Heizbetrieb (Status fehlt, unbekannt oder zeigt keinen Heizbetrieb).")
         else:
             stage = "level"
             if len(current) < th["nights_slope"]:
@@ -344,6 +373,11 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
                 stage = "level_and_slope"
         if outages:
             reasons.append(f"{len(outages)} Messausfall/-ausfälle über {th['long_outage_hours']} h – gesondert prüfen.")
+    # WW/defrost phases must be visible in the evaluated nights, otherwise the result is restricted.
+    disturbance_checked = bool(current) and all(n["disturbances_verified"] for n in current)
+    disturbance_notice = None
+    if stage in ("level", "level_and_slope") and not disturbance_checked:
+        disturbance_notice = "WW-/Abtauphasen nicht zuverlässig erfasst. Messergebnis fachlich eingeschränkt."
     if not out["window"]["complete"] and stage != "no_data":
         reasons.append("Messung läuft noch – Ergebnis vorläufig.")
 
@@ -353,8 +387,12 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
     raw_diffs = [n["outdoor_raw_median"] - n["outdoor_median"] for n in nights
                  if n["outdoor_raw_median"] is not None and n["outdoor_median"] is not None and roles.get("outdoor_damped")]
     out.update({
-        "stage": stage, "stage_text": STAGE_TEXT[stage], "reasons": reasons,
-        "nights": nights, "valid_nights": len(current), "valid_hours": round(sum(n["ok_hours"] for n in current), 1),
+        "stage": stage, "reasons": reasons,
+        "stage_text": STAGE_TEXT[stage], "disturbance_notice": disturbance_notice,
+        # Review 8: without verified DHW/defrost coverage a level/slope statement is only provisional.
+        "restricted": disturbance_notice is not None, "restricted_label": RESTRICTED_LABEL if disturbance_notice else None,
+        "disturbances_verified": disturbance_checked,
+        "nights": nights, "technical_nights": len(valid_current), "valid_nights": len(current), "valid_hours": round(sum(n["ok_hours"] for n in current), 1),
         "outdoor_band": {"min": sorted_band[0] if band else None, "max": sorted_band[-1] if band else None,
                          "span_k": round(sorted_band[-1] - sorted_band[0], 1) if band else None,
                          "damped": bool(roles.get("outdoor_damped")),
@@ -378,6 +416,11 @@ def report_text(result, fmt=lambda iso: iso):
     band = result["outdoor_band"]
     outdoor = "regelungsrelevante (gedämpfte) Außentemperatur" if band["damped"] else "ungedämpfte Außentemperatur"
     texts = []
+    if result["stage"] == "unverified":
+        texts.append(f"Von {result['technical_nights']} technisch auswertbaren Nächten war der Heizbetrieb nur in "
+                     f"{result['valid_nights']} durch gültige Statuswerte der Wärmepumpe nachgewiesen. Temperaturdaten sind "
+                     "vorhanden, eine belastbare Heizkurvenbewertung ist damit nicht möglich. Der Bericht enthält nur "
+                     "beschreibende Messdaten.")
     if result["stage"] in ("no_data", "insufficient"):
         texts.append(f"Im Messzeitraum waren {result['valid_nights']} geeignete Nächte mit insgesamt "
                      f"{_de(result['valid_hours'])} verwertbaren Stunden vorhanden. "
@@ -392,6 +435,8 @@ def report_text(result, fmt=lambda iso: iso):
         texts.append(f"Die Messung deckte eine {outdoor} von {_de(band['min'])} bis {_de(band['max'])} °C mit "
                      f"{result['valid_nights']} geeigneten Nächten ab. Eine Anpassung des Auslegungspunkts kann fachlich "
                      "geprüft werden. Die Aussage gilt nur für diese Messbereiche; eine volle Jahresvalidierung ist nicht erfolgt.")
+    if result.get("disturbance_notice"):
+        texts.append(result["disturbance_notice"])
     for o in result["long_outages"]:
         texts.append(f"Zwischen {fmt(o['start'])} und {fmt(o['end'])} fehlen Messwerte. Dieser Zeitraum wurde nicht ersetzt. "
                      "Der Bericht kennzeichnet die eingeschränkte Aussagekraft.")
