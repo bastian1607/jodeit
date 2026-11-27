@@ -30,7 +30,7 @@ STAMP = datetime.now(timezone.utc).isoformat()
 
 def ent(entity_id, name, state="21", unit="°C", device_class="temperature"):
     return dict(entity_id=entity_id, name=name, state=state, unit=unit, device_class=device_class,
-                source_at=STAMP, last_reported=STAMP, last_updated=STAMP)
+                source_at=STAMP, source_at_kind="reported", last_reported=STAMP, last_updated=STAMP)
 
 
 ENTITIES = [
@@ -772,6 +772,24 @@ class MobileTests(V2Browser):
         self.tab("3 Heizungsanlage & Heizkreise")
         expect(self.page.locator("#hs-detect-box")).to_contain_text("Teilweise erkannt")
         expect(self.page.locator("#hs-adopt")).to_have_count(0)
+
+    def test_review10_start_dialog_names_ha_timestamp(self):
+        """AC10-02/03: HA report 18 h old, own poll fresh -> valid value, correct timestamp wording, hint."""
+        from datetime import timedelta
+        old = (datetime.now(timezone.utc) - timedelta(hours=18)).isoformat()
+        self.entities = [dict(e, source_at=old, source_at_kind="reported") if e["entity_id"] == "sensor.wohnzimmer_t" else e
+                         for e in self.entities]
+        self.seed(rooms=("Wohnzimmer",))
+        server.sample()
+        self.open()
+        self.tab("5 Prüfen & Messung")
+        review = self.page.locator("#session-sensor-review")
+        expect(review).to_contain_text("letzte Meldung an Home Assistant vor 18")
+        expect(review).to_contain_text("AutoBalance zuletzt erfolgreich abgefragt")
+        expect(review).to_contain_text("Sensoraktivität nicht separat bestätigt")
+        expect(review).not_to_contain_text("Fühler manuell prüfen")      # < 24 h
+        expect(review).not_to_contain_text("veraltet")
+        expect(review).not_to_contain_text("Änderung")                   # never claims a temperature change
 
 
     def test_ab026_retention_archive_delete_and_reset(self):
