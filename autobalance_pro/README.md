@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.3.0
+# Jodeit AutoBalance Pro v0.4.0
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -18,6 +18,23 @@
 5. Räume, Sensoren, Fensterkontakte, Heizkörper und thermische Zonen einrichten. BBQKees/EMS-ESP-Messwerte sind auswählbar, sofern sie als HA-Entitäten vorhanden sind.
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
+
+## Änderungen in v0.4.0 (freigegeben 27.11.2026)
+
+Weiterhin rein lesend: keine Steuerbefehle an Wärmepumpe, Ventile oder Home Assistant.
+
+- AB-013: Räume ohne Temperaturfühler („nicht überwacht“) mit eigener Komfort-Solltemperatur;
+  Auslegungs-Innentemperatur mit Quelle, getrennt vom Komfort-Soll (der Anteilsvorschlag nutzt nicht
+  mehr das Komfort-Soll). Raumstatus, Abdeckung je Raum/Zone, begründete Messpunkt-Hinweise.
+- AB-024: Messungen mit Freitext (Name, Auftrag/Angebot) und Notiz, Knöpfe „Messung beginnen“ /
+  „Messung stoppen“ (auch in der Übersicht), Liste früherer Messungen mit „Bericht drucken“ und CSV.
+- AB-014: Aussagekraft je Messung (keine Daten / unzureichend / Niveau / Niveau und Steigung) nach dem
+  Pilotregelwerk (geeignete Nächte 22–06 Uhr, Störfenster, Außentemperaturband). Keine Parameterempfehlung.
+- AB-020 AC-06: druckbarer Messbericht je Messung (`api/v2/sessions/<id>/report`), CSV je Messung;
+  Übersicht zeigt „Abdeckung seit Messbeginn“.
+- AB-023: Geräteprofil wird aus vorhandenen HA-Entitäten erkannt und mit einem Klick übernommen.
+- Datenbank additiv: Tabellen `config_history` und `sessions`. Image enthält `tzdata` (Nächte in Ortszeit).
+- Rückweg: v0.3.0 ignoriert die neuen Tabellen/Felder, lehnt aber Räume ohne Fühler beim Speichern ab.
 
 ## Änderungen in v0.3.0 (freigegeben 27.11.2026)
 
