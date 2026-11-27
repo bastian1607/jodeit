@@ -722,5 +722,34 @@ class MobileTests(V2Browser):
         self.shot("ab015-waermepumpe-raeume")
 
 
+    def test_ab022_profile_detected_and_adopted_with_one_click(self):
+        """AB-022: all profile entities exist in HA -> proposal; nothing saved before the click."""
+        import devices
+        self.seed(rooms=("Wohnzimmer",))
+        for sid, f in devices.entities({"profile": "buderus-emsesp-hmc310", "source": "ha"}).items():
+            self.entities.append(ent(sid, f["label"], "1", f["unit"], ""))
+        self.open()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        box = self.page.locator("#hs-detect-box")
+        expect(box).to_contain_text("Erkannt: Buderus")
+        expect(box).to_contain_text("30 von 30")
+        self.assertEqual(self.v2()["building"]["heat_source"]["profile"], "")   # proposal only
+        self.page.click("#hs-adopt")
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        hs = self.v2()["building"]["heat_source"]
+        self.assertEqual((hs["profile"], hs["source"]), ("buderus-emsesp-hmc310", "ha"))
+        self.page.reload()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        expect(self.page.locator("#hs-detect-box")).to_have_count(0)        # configured -> no proposal
+
+    def test_ab022_partial_match_is_hint_only(self):
+        self.seed(rooms=("Wohnzimmer",))
+        self.entities += [ent("number.thermostat_hc1_designtemp", "hc1 Design temperature", "54", "°C", "")]
+        self.open()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        expect(self.page.locator("#hs-detect-box")).to_contain_text("Teilweise erkannt")
+        expect(self.page.locator("#hs-adopt")).to_have_count(0)
+
+
 if __name__ == "__main__":
     unittest.main()

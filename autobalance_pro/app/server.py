@@ -541,6 +541,11 @@ class API(BaseHTTPRequestHandler):
             result["calculation_blockers"]=model.calculation_blockers(cfg)  # AB-008 format, kept for compatibility
             return self.send_json(200,result)
         if path=="/api/v2/catalog":return self.send_json(200,{"valves":model.VALVE_CATALOG})
+        if path=="/api/v2/heat-source/detect":
+            # AB-022: read-only match of existing HA entities against the profiles; stores nothing.
+            try:ha={x["entity_id"]:x for x in get_entities()}
+            except Exception:return self.send_json(503,{"error":"Home Assistant derzeit nicht erreichbar"})
+            return self.send_json(200,devices.detect(ha))
         if path=="/api/v2/heat-source/profiles":
             return self.send_json(200,{"sources":devices.SOURCES,"write_enabled":devices.WRITE_ENABLED,
                 "profiles":[{"key":p["key"],"label":p["label"],"verified":p["verified"],"fields":len(p["fields"])} for p in devices.PROFILES.values()]})

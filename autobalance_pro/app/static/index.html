@@ -138,6 +138,7 @@ details.card>.body{padding:0 12px 12px}
 <div><label>Warmwasserstatus (HA)</label><div id="hp-dhw"></div></div>
 </div>
 <h3>Wärmepumpe und Heizkurve auslesen (nur lesen)</h3>
+<div id="hs-detect"></div>
 <p class="hint">Mit einem Geräteprofil liest AutoBalance Heizkurve, Vorlauf/Rücklauf und Betriebszustand der Wärmepumpe mit. Es werden keine Werte an die Wärmepumpe gesendet.</p>
 <div class="grid">
 <div><label for="hs-profile">Geräteprofil</label><select id="hs-profile"><option value="">Kein Profil</option></select></div>
@@ -596,6 +597,25 @@ function showPlant(){
   sel.value=hs.profile||'';el('hs-source').value=hs.source||'ha';el('hs-host').value=hs.emsesp_host||'';
   el('hs-result').replaceChildren();syncHeatSource();
   drawCircuits();
+  detectHeatSource(hs.profile);
+}
+/* AB-022: propose a matching profile from existing HA entities; saving needs one click. */
+async function detectHeatSource(current){
+  const root=el('hs-detect');root.replaceChildren();if(current)return;
+  let d;try{d=await api('v2/heat-source/detect')}catch(_){return}
+  const best=d.candidates[0];if(!best)return;
+  const box=document.createElement('div');box.className=best.proposed?'info-box':'warn-box';box.id='hs-detect-box';
+  const t=document.createElement('p');
+  if(best.proposed){
+    t.textContent='Erkannt: '+best.label+' · '+best.found+' von '+best.total+' Werten in Home Assistant vorhanden.';
+    const btn=document.createElement('button');btn.type='button';btn.className='primary';btn.id='hs-adopt';btn.textContent='Profil übernehmen und speichern';
+    btn.addEventListener('click',()=>{el('hs-profile').value=best.profile;el('hs-source').value='ha';el('hs-host').value='';syncHeatSource();markPlantDirty();el('plant-form').requestSubmit()});
+    box.append(t,btn);
+  }else{
+    t.textContent='Teilweise erkannt: '+best.label+' · '+best.found+' von '+best.total+' Werten'+(best.core_missing.length?' (es fehlen Kernwerte)':'')+'. Kein automatischer Vorschlag – Profil nur nach Prüfung manuell wählen.';
+    box.append(t);
+  }
+  root.append(box);
 }
 function syncHeatSource(){
   const on=Boolean(el('hs-profile').value);

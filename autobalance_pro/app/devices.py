@@ -243,3 +243,26 @@ def probe(heat_source, ha_states=None, now_iso="", fetch=None):
                      "value": state if found else None, "unit": field["unit"], "found": found})
     return {"profile": prof["key"], "source": heat_source["source"], "errors": errors,
             "found": sum(r["found"] for r in rows), "total": len(rows), "fields": rows}
+
+
+# AB-022: fields that must be present before a profile is proposed automatically.
+CORE_FIELDS = ("outdoor_damped", "flow_target", "flow", "curve_design", "curve_offset")
+DETECT_SHARE = 0.9
+
+
+def detect(ha_states):
+    """Read-only: which profiles match the entities that already exist in Home Assistant?
+
+    A profile is *proposed* only if all core fields and at least 90 % of all fields are found.
+    Nothing is saved; the user confirms with one click.
+    """
+    results = []
+    for key, prof in PROFILES.items():
+        r = probe({"profile": key, "source": "ha"}, ha_states or {})
+        found = {f["key"] for f in r["fields"] if f["found"]}
+        core_missing = [k for k in CORE_FIELDS if k not in found]
+        results.append({"profile": key, "label": prof["label"], "found": r["found"], "total": r["total"],
+                        "core_missing": core_missing,
+                        "proposed": not core_missing and r["found"] >= DETECT_SHARE * r["total"]})
+    results.sort(key=lambda x: (x["proposed"], x["found"]), reverse=True)
+    return {"candidates": [x for x in results if x["found"]], "read_only": True}
