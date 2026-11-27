@@ -38,7 +38,7 @@ THRESHOLDS = {
 SLOT = timedelta(minutes=THRESHOLDS["slot_minutes"])
 
 STAGE_TEXT = {
-    "no_data": "Keine Messdaten im Messauftrag",
+    "no_data": "Keine Messdaten in dieser Messung",
     "insufficient": "Messung unzureichend – keine Heizkurvenempfehlung",
     "level": "Niveau im Messbereich prüfbar – Steigung nicht beurteilbar",
     "level_and_slope": "Niveau und Steigung in den Messbereichen prüfbar (nur Technikerprüfung)",
@@ -321,7 +321,7 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
     sorted_band = sorted(band)
     if not ticks:
         stage = "no_data"
-        reasons.append("Im Messauftrag wurden keine Messwerte gespeichert.")
+        reasons.append("In dieser Messung wurden keine Messwerte gespeichert.")
     else:
         stage = "insufficient"
         if not outdoor_role or not flow_roles:
@@ -345,7 +345,7 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         if outages:
             reasons.append(f"{len(outages)} Messausfall/-ausfälle über {th['long_outage_hours']} h – gesondert prüfen.")
     if not out["window"]["complete"] and stage != "no_data":
-        reasons.append("Messauftrag läuft noch – Ergebnis vorläufig.")
+        reasons.append("Messung läuft noch – Ergebnis vorläufig.")
 
     for n in nights:
         for key in ("_ok_ticks", "_start", "_end", "_vw"):

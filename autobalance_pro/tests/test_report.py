@@ -76,7 +76,7 @@ class ReportTests(unittest.TestCase):
     def test_job_without_data_reports_whole_window_as_gap(self):
         end = START + timedelta(hours=3)
         html = server.session_report(self.job["id"], now=end)
-        self.assertIn("Keine Messdaten im Messauftrag", html)
+        self.assertIn("Keine Messdaten in dieser Messung", html)
         self.assertIn("(180 min) – andauernd", html)
 
     def test_endpoints_and_csv_limited_to_job(self):

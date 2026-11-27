@@ -336,7 +336,7 @@ def target_changes(start=None,end=None):
             previous[r["id"]]=cur
     return changes
 
-SESSION_NAME=re.compile(r"^[^<>]{1,80}$")
+SESSION_NAME=re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")  # AB-024: free text (name, order/offer …); output is always escaped
 def _session_row(r):
     keys=("id","name","started_at","ended_at","planned_days","rooms","note")
     d=dict(zip(keys,r));d["rooms"]=json.loads(d["rooms"]);return d
@@ -354,18 +354,18 @@ def start_session(data,now=None):
     """Start a measuring job. Local bookkeeping only – nothing is sent to HA or the heat pump."""
     if not isinstance(data,dict):raise ValueError("Angaben fehlen")
     name=data.get("name")
-    if not isinstance(name,str) or not SESSION_NAME.fullmatch(name.strip()):raise ValueError("Bezeichnung des Messauftrags fehlt (max. 80 Zeichen)")
+    if not isinstance(name,str) or not SESSION_NAME.fullmatch(name.strip()):raise ValueError("Bezeichnung der Messung fehlt (max. 120 Zeichen)")
     days=data.get("planned_days",7)
     if isinstance(days,bool) or not isinstance(days,int) or not 1<=days<=31:raise ValueError("Geplante Dauer 1–31 Tage")
-    if data.get("confirmed") is not True:raise ValueError("Auswahl der Messräume bitte bestätigen")
+    if data.get("confirmed") is not True:raise ValueError("Beginn der Messung bitte bestätigen")
     note=data.get("note") or ""
-    if not isinstance(note,str) or len(note)>500:raise ValueError("Notiz ungültig")
+    if not isinstance(note,str) or len(note)>1000 or re.search(r"[\x00-\x09\x0b-\x1f\x7f]",note):raise ValueError("Notiz ungültig (max. 1000 Zeichen)")
     with LOCK:
         cfg=load_v2();hints=monitoring.reference_hints(cfg)
         rooms=[{"id":r["id"],"name":r["name"],"target":r.get("target"),"sensors":list(r.get("temperature_sensors",[])),
                 "window_sensors":list(r.get("window_sensors",[])),"hints":hints.get(r["id"],[])} for r in cfg["rooms"]]
         if not any(r["sensors"] for r in rooms):raise ValueError("Mindestens ein Raum mit Temperaturfühler ist für einen Messauftrag nötig")
-        if list_sessions()["active"]:raise ValueError("Es läuft bereits ein Messauftrag")
+        if list_sessions()["active"]:raise ValueError("Es läuft bereits eine Messung – bitte zuerst stoppen")
         sid="ma_"+uuid.uuid4().hex[:12];at=(now or utcnow()).isoformat()
         with connect() as c:c.execute("INSERT INTO sessions(id,name,started_at,planned_days,rooms,note) VALUES(?,?,?,?,?,?)",(sid,name.strip(),at,days,json.dumps(rooms,ensure_ascii=False),note.strip()))
     log_event("session_start",sid)

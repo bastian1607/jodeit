@@ -188,7 +188,12 @@ class StorageTests(unittest.TestCase):
             server.start_session({"name": "", "confirmed": True})
         with self.assertRaises(ValueError):
             server.start_session({"name": "x", "planned_days": 0, "confirmed": True})
-        s = server.start_session({"name": "Pilot Musterhaus", "confirmed": True})
+        with self.assertRaises(ValueError):
+            server.start_session({"name": "a" * 121, "confirmed": True})
+        with self.assertRaises(ValueError):
+            server.start_session({"name": "Zeile\nUmbruch", "confirmed": True})
+        s = server.start_session({"name": "Müller <Angebot 2026-123>", "note": "Zeile 1\nZeile 2", "confirmed": True})
+        self.assertEqual((s["name"], s["note"]), ("Müller <Angebot 2026-123>", "Zeile 1\nZeile 2"))
         self.assertEqual(s["planned_days"], 7)
         self.assertEqual([r["name"] for r in s["rooms"] if not r["sensors"]], ["Schlafen"])
         with self.assertRaises(ValueError):
