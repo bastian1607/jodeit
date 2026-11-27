@@ -33,8 +33,11 @@ Regeln (Review ChatGPT 12):
   geändert). Er folgt dem Regler, solange er unverändert ist; **manuell hinterlegte Werte werden nie überschrieben**.
 - Kreiswerte nur in den Heizkreis, dem das Profil zugeordnet ist („Profil gilt für Heizkreis“; bei einem Kreis
   automatisch). Ohne eindeutige Zuordnung werden keine Kreiswerte übernommen.
-- Wechsel von Profil, Datenquelle oder Heizkreis nur mit Bestätigung; dabei werden die automatischen Werte der
-  bisherigen Quelle entfernt und neu übernommen, manuelle bleiben.
+- Wechsel von Profil, Datenquelle, EMS-ESP-Gateway (IP-Adresse) oder Heizkreis nur mit Bestätigung; dabei werden
+  die automatischen Werte der bisherigen Quelle entfernt und neu übernommen, manuelle bleiben.
+- Ein bereits ausgefülltes Feld ohne gespeicherte Herkunft wird nie still übernommen, auch wenn es dem Anlagenwert
+  entspricht („Herkunft nicht bestätigt · automatische Nachführung aus“). Nur ausdrücklich über
+  „Diese Werte künftig automatisch nachführen …“ (protokolliert als `autofill_adopt`).
 - Die **minimale Außentemperatur des Reglers wird nicht als Norm-Außentemperatur übernommen**; sie steht als
   Reglerwert neben dem Feld („Norm-Außentemperatur laut Heizlast: noch nicht bestätigt“).
 - Nicht automatisch: Heizkurven-Stützpunkte, Auslegungsvorlauf/-rücklauf, Verdichterstatus, Modell, Nennleistung,

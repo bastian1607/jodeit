@@ -330,7 +330,7 @@ def heat_source_snapshot(now=None):
         "source":source.get("source"),"source_errors":HEAT_SOURCE_STATUS["errors"] if source.get("source")=="emsesp_rest" else {},
         "fields":items,"rooms":rooms,"read_only":True}
 
-AUTOFILL_STATUS={"at":None,"changed":[]}
+AUTOFILL_STATUS={"at":None,"ok_at":None,"changed":[]}
 
 def _profile_values(cfg,now):
     """Currently valid readings of the profile entities: {field key: {entity_id, value}}."""
@@ -352,8 +352,10 @@ def autofill_from_source(now=None):
         cfg=load_v2()
         if not devices.profile(heat_source(cfg).get("profile")):return None
         before=json.dumps(cfg,sort_keys=True);previous=json.loads(before)
-        changed=devices.autofill(cfg,_profile_values(cfg,now),now.isoformat(),local_date(now))
+        values=_profile_values(cfg,now)
+        changed=devices.autofill(cfg,values,now.isoformat(),local_date(now))
         AUTOFILL_STATUS.update(at=now.isoformat(),changed=changed)
+        if values:AUTOFILL_STATUS["ok_at"]=now.isoformat()   # last check with valid profile readings
         if json.dumps(cfg,sort_keys=True)==before:return changed
         cfg=model.validate(cfg)
         with connect() as c:
@@ -367,9 +369,27 @@ def autofill_from_source(now=None):
 def autofill_report(now=None):
     """Persistent status of every auto field, derived from configuration and current readings."""
     cfg=load_v2()
-    return {"checked_at":AUTOFILL_STATUS["at"],"last_changes":AUTOFILL_STATUS["changed"],
+    hs=heat_source(cfg)
+    return {"checked_at":AUTOFILL_STATUS["at"],"checked_ok_at":AUTOFILL_STATUS["ok_at"],"last_changes":AUTOFILL_STATUS["changed"],
+        "profile_label":(devices.profile(hs.get("profile")) or {}).get("label"),"source":hs.get("source"),"gateway":devices.gateway(hs),
         "circuit_id":(devices.bound_circuit(cfg) or {}).get("id"),
         "fields":devices.autofill_status(cfg,_profile_values(cfg,now or utcnow()))}
+
+def adopt_autofill(data,now=None):
+    """AC13-04: explicit installer action - let the app follow existing values that match the device."""
+    now=now or utcnow()
+    paths=data.get("paths") if isinstance(data,dict) else None
+    if not isinstance(paths,list) or not all(isinstance(x,str) for x in paths) or not paths:raise ValueError("Keine Felder gewählt")
+    if data.get("confirmed") is not True:raise ValueError("Übernahme bitte bestätigen")
+    with LOCK:
+        cfg=load_v2()
+        adopted=devices.adopt_existing(cfg,paths,_profile_values(cfg,now),now.isoformat())
+        if adopted:
+            cfg=model.validate(cfg)
+            with connect() as c:
+                _write_config(c,cfg)
+                c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(now.isoformat(),"autofill_adopt",json.dumps(cfg,ensure_ascii=False)))
+    return {"adopted":adopted}
 
 def prepare_source_switch(data):
     """Review 12, P0: on a change of profile, source or circuit no automatic value of the old source may stay.
@@ -380,9 +400,12 @@ def prepare_source_switch(data):
     hs=data["building"].get("heat_source")
     if not isinstance(hs,dict):return data
     previous=load_v2();old=heat_source(previous)
-    try:new_circuit=(devices.bound_circuit(data) or {}).get("id")
-    except (AttributeError,TypeError):new_circuit=None
-    switched=(old.get("profile") or "",old.get("source") or "ha",(devices.bound_circuit(previous) or {}).get("id"))!=(hs.get("profile") or "",hs.get("source") or "ha",new_circuit)
+    try:new_identity=devices.source_identity(data)
+    except (AttributeError,TypeError,KeyError):new_identity=None
+    if new_identity and hs.get("source")=="emsesp_rest" and hs.get("emsesp_host"):
+        try:new_identity=new_identity[:2]+(devices.normalise_host(hs["emsesp_host"]),)+new_identity[3:]   # compare canonical host
+        except ValueError:pass
+    switched=devices.source_identity(previous)!=new_identity
     if not switched:return data
     paths=devices.auto_values_to_clear(previous,data)
     if paths and hs.get("switch_confirmed") is not True:
@@ -1070,12 +1093,13 @@ class API(BaseHTTPRequestHandler):
         return self.send_json(404,{"error":"Nicht gefunden"})
     def do_POST(self):
         path=urlsplit(self.path).path
-        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion","/api/v2/heat-source/test","/api/v2/sessions/start","/api/v2/sessions/stop","/api/v2/sessions/archive","/api/v2/sessions/delete","/api/v2/reset"):return self.send_json(404,{"error":"Nicht gefunden"})
+        if path not in ("/api/config","/api/v2/config","/api/v2/heat-source/autofill/adopt","/api/v2/load-share-suggestion","/api/v2/heat-source/test","/api/v2/sessions/start","/api/v2/sessions/stop","/api/v2/sessions/archive","/api/v2/sessions/delete","/api/v2/reset"):return self.send_json(404,{"error":"Nicht gefunden"})
         limit=100000 if path=="/api/config" else 500000
         try:
             size=int(self.headers.get("Content-Length","0"))
             if not 1<=size<=limit:return self.send_json(413,{"error":"Ungültige Datenlänge"})
             data=json.loads(self.rfile.read(size))
+            if path=="/api/v2/heat-source/autofill/adopt":return self.send_json(200,adopt_autofill(data))
             if path=="/api/v2/sessions/start":return self.send_json(200,start_session(data))
             if path=="/api/v2/sessions/stop":return self.send_json(200,stop_session(data.get("id") if isinstance(data,dict) else None))
             if path=="/api/v2/sessions/archive":return self.send_json(200,archive_session(data.get("id") if isinstance(data,dict) else None))

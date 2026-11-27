@@ -279,8 +279,86 @@ class AutofillTests(unittest.TestCase):
         st = self.status()
         self.assertEqual(st["circuit.entities.flow"]["status"], "unclear")
         self.assertEqual(st["circuit.entities.flow"]["text"], "Herkunft ungeklärt / Abgleich erforderlich")
-        self.assertEqual(st["circuit.entities.return"]["status"], "auto")
+        self.assertEqual(st["circuit.entities.return"]["status"], "matches_unconfirmed")   # review 13: no provenance by equality
+        self.assertNotIn("circuit.entities.return", server.load_v2()["building"]["heat_source"]["autofilled"])
         self.assertEqual(server.load_v2()["circuits"][0]["entities"]["flow"], "sensor.irgendwas")
+
+    # ------------------------------------------------------------------ review 13: AC13-01..05
+    def test_ac13_01_existing_equal_value_survives_source_switch(self):
+        cfg = self.config()
+        cfg["circuits"][0]["entities"]["return"] = "sensor.boiler_rettemp"             # entered before any import
+        server.save_v2(cfg)
+        self.run_autofill()
+        cfg = server.load_v2()
+        cfg["building"]["heat_source"].update(source="emsesp_rest", emsesp_host="192.168.178.69", switch_confirmed=True)
+        self.save_ui(cfg)
+        cfg = server.load_v2()
+        self.assertEqual(cfg["circuits"][0]["entities"]["return"], "sensor.boiler_rettemp")   # not deleted
+        self.assertEqual(cfg["circuits"][0]["entities"]["flow"], "")                          # app value removed
+
+    def test_ac13_02_existing_emitter_type_not_overwritten_by_device_change(self):
+        cfg = self.config()
+        cfg["circuits"][0]["emitter_type"] = "radiators"
+        server.save_v2(cfg)
+        self.run_autofill()
+        self.assertEqual(self.status()["circuit.emitter_type"]["status"], "matches_unconfirmed")
+        self.plant["select.thermostat_hc1_heatingtype"] = "floor"
+        self.run_autofill()
+        self.assertEqual(server.load_v2()["circuits"][0]["emitter_type"], "radiators")
+        st = self.status()["circuit.emitter_type"]
+        self.assertEqual(st["status"], "unclear")
+        self.assertEqual(st["text"], "Herkunft ungeklärt / Abgleich erforderlich")
+
+    def test_ac13_03_only_app_filled_values_follow_and_are_cleared(self):
+        server.save_v2(self.config())
+        self.run_autofill()
+        done = server.load_v2()["building"]["heat_source"]["autofilled"]
+        self.assertTrue(all("adopted_by_installer" not in r for r in done.values()))
+        self.plant["sensor.boiler_rettemp"] = "41.0"                                   # value change, same entity -> nothing
+        self.assertEqual(self.run_autofill(), [])
+
+    def test_ac13_04_explicit_adoption(self):
+        cfg = self.config()
+        cfg["circuits"][0]["emitter_type"] = "radiators"
+        server.save_v2(cfg)
+        with patch.object(server, "get_entities", side_effect=self.states):
+            server.sample()
+            with self.assertRaises(ValueError):
+                server.adopt_autofill({"paths": ["circuit.emitter_type"]})                # no confirmation
+            r = server.adopt_autofill({"paths": ["circuit.emitter_type", "circuit.entities.flow"], "confirmed": True})
+        self.assertEqual(r["adopted"], ["Heizflächenart Heizkreis"])                     # empty field is not "adopted"
+        rec = server.load_v2()["building"]["heat_source"]["autofilled"]["circuit.emitter_type"]
+        self.assertIn("adopted_by_installer", rec)
+        self.assertEqual(self.status()["circuit.emitter_type"]["status"], "auto")
+        self.plant["select.thermostat_hc1_heatingtype"] = "floor"
+        self.run_autofill()
+        self.assertEqual(server.load_v2()["circuits"][0]["emitter_type"], "underfloor")  # follows after adoption
+        with server.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM config_history WHERE kind='autofill_adopt'").fetchone()[0], 1)
+
+    def test_ac13_05_rest_gateway_change_is_a_source_switch(self):
+        server.save_v2(self.config("emsesp_rest"))
+        cfg = server.load_v2()
+        devices.autofill(cfg, {"curve_design": {"entity_id": "emsesp.x", "value": "54"}}, "2026-11-27T12:00:00+00:00", "27.11.2026")
+        server.save_v2(cfg)
+        rec = server.load_v2()["building"]["heat_source"]["autofilled"][devices.PARAMS_PATH]
+        self.assertEqual(rec["gateway"], "192.168.178.69")
+        cfg = server.load_v2()
+        cfg["building"]["heat_source"]["emsesp_host"] = "192.168.178.70"                 # other plant / measuring kit
+        with self.assertRaises(ValueError):
+            self.save_ui(cfg)
+        self.assertEqual(server.load_v2()["building"]["heat_source"]["emsesp_host"], "192.168.178.69")
+        cfg["building"]["heat_source"]["switch_confirmed"] = True
+        self.save_ui(cfg)
+        cfg = server.load_v2()
+        self.assertEqual(cfg["circuits"][0]["heating_curve"]["manufacturer_params"], {})
+        devices.autofill(cfg, {"curve_design": {"entity_id": "emsesp.x", "value": "50"}}, "2026-11-27T13:00:00+00:00", "27.11.2026")
+        self.assertEqual(cfg["building"]["heat_source"]["autofilled"][devices.PARAMS_PATH]["gateway"], "192.168.178.70")
+        # same host written differently is no switch
+        server.save_v2(cfg)
+        cfg = server.load_v2()
+        cfg["building"]["heat_source"]["emsesp_host"] = " 192.168.178.70 "
+        self.save_ui(cfg)
 
     def test_ac09_no_profile_and_no_write_path(self):
         server.save_v2(model.empty())

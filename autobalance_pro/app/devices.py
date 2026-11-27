@@ -322,6 +322,7 @@ AUTOFILL_STATUS_TEXT = {
     "no_circuit": "Nicht automatisch übernommen: Heizkreis für das Profil wählen",
     "multi_circuit": "Nicht automatisch übernommen: mehrere Heizkreise",
     "unmapped": "Nicht automatisch übernommen: Reglerwert nicht eindeutig",
+    "matches_unconfirmed": "Vorhandener Wert stimmt mit der Anlage überein · Herkunft nicht bestätigt · automatische Nachführung aus",
     "empty": "Leer",
 }
 
@@ -394,9 +395,14 @@ def _proposals(cfg, values):
     return out, circuit
 
 
+def gateway(source):
+    """Identity of the concrete data source (review 13): the REST gateway host; HA has no hardware identity."""
+    return (source.get("emsesp_host") or "") if source.get("source", "ha") == "emsesp_rest" else ""
+
+
 def _current_record(rec, source, circuit, path):
     return (isinstance(rec, dict) and rec.get("profile") == source.get("profile")
-            and rec.get("source") == source.get("source", "ha")
+            and rec.get("source") == source.get("source", "ha") and (rec.get("gateway") or "") == gateway(source)
             and (not path.startswith("circuit.") or rec.get("circuit_id") == (circuit or {}).get("id")))
 
 
@@ -414,7 +420,7 @@ def autofill(cfg, values, now_iso, today):
     changed = []
 
     def record(path, value, first=None):
-        done[path] = {"value": value, "profile": source["profile"], "source": source.get("source", "ha"),
+        done[path] = {"value": value, "profile": source["profile"], "source": source.get("source", "ha"), "gateway": gateway(source),
                       "circuit_id": (circuit or {}).get("id") if path.startswith("circuit.") else None,
                       "read_at": first or now_iso, "changed_at": now_iso}
 
@@ -434,8 +440,7 @@ def autofill(cfg, values, now_iso, today):
                 node[key] = new
                 record(path, new, rec.get("read_at"))
                 changed.append(path)
-        elif rec is None and current == new:
-            record(path, new)        # same value as the device: take over provenance, nothing changes
+        # Review 13, P0: a filled field without provenance is never taken over by value equality.
     # The source/date of the curve parameters follows their last real change (review 12).
     if circuit is not None and PARAMS_PATH in changed:
         node, key = _node(cfg, REFERENCE_PATH, circuit)
@@ -467,7 +472,7 @@ def autofill_status(cfg, values):
             else:
                 status = "auto" if rec.get("value") == current else "manual"
         elif not _empty(current):
-            status = "auto" if new is not None and new == current else "unclear"
+            status = "matches_unconfirmed" if new is not None and new == current else "unclear"
         else:
             status = reason if reason != "ok" else "empty"
         rows.append({"path": path, "label": AUTOFILL_LABELS[path], "status": status, "text": AUTOFILL_STATUS_TEXT[status],
@@ -477,12 +482,40 @@ def autofill_status(cfg, values):
     return rows
 
 
+def source_identity(cfg):
+    """(profile, source, gateway, bound circuit) - a change of any part is a source switch (review 12/13)."""
+    hs = cfg["building"].get("heat_source") or {}
+    return (hs.get("profile") or "", hs.get("source") or "ha", gateway(hs), (bound_circuit(cfg) or {}).get("id"))
+
+
+def adopt_existing(cfg, paths, values, now_iso):
+    """Review 13, AC13-04: the installer explicitly lets the app follow an existing value. Only for filled fields
+    without provenance that currently match the device. Returns the adopted labels."""
+    source = cfg["building"].get("heat_source") or {}
+    if not profile(source.get("profile")):
+        raise ValueError("Kein Geräteprofil gewählt")
+    proposals, circuit = _proposals(cfg, values)
+    done = source.setdefault("autofilled", {})
+    adopted = []
+    for path in paths:
+        if path not in proposals or path in done:
+            continue
+        new, _ = proposals[path]
+        node, key = _node(cfg, path, circuit) if (circuit is not None or not path.startswith("circuit.")) else (None, None)
+        if node is None or _empty(node.get(key)) or new is None or node.get(key) != new:
+            continue
+        done[path] = {"value": new, "profile": source["profile"], "source": source.get("source", "ha"), "gateway": gateway(source),
+                      "circuit_id": (circuit or {}).get("id") if path.startswith("circuit.") else None,
+                      "read_at": now_iso, "changed_at": now_iso, "adopted_by_installer": now_iso}
+        adopted.append(AUTOFILL_LABELS[path])
+    return adopted
+
+
 def auto_values_to_clear(previous, cfg):
     """Paths whose value is still the automatic value of a *different* profile/source/circuit (review 12, P0)."""
     old = (previous["building"].get("heat_source") or {})
     new = (cfg["building"].get("heat_source") or {})
-    if (old.get("profile") or "", old.get("source") or "ha", (bound_circuit(previous) or {}).get("id")) == \
-       (new.get("profile") or "", new.get("source") or "ha", (bound_circuit(cfg) or {}).get("id")):
+    if source_identity(previous) == source_identity(cfg):
         return []
     done = new.get("autofilled") or old.get("autofilled") or {}
     out = []

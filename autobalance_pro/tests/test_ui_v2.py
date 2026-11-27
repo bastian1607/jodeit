@@ -88,7 +88,7 @@ class V2Browser(unittest.TestCase):
         for method, path in self.requests:
             self.assertTrue(path.startswith("/api/") or path in ("/", "/jodeit-logo.png"), path)
             if method == "POST":
-                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop", "/api/v2/sessions/archive", "/api/v2/sessions/delete", "/api/v2/reset"), path)
+                self.assertIn(path, ("/api/v2/config", "/api/v2/heat-source/autofill/adopt", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop", "/api/v2/sessions/archive", "/api/v2/sessions/delete", "/api/v2/reset"), path)
 
     # ------------------------------------------------------------- helpers
     def v2(self):
@@ -788,7 +788,11 @@ class MobileTests(V2Browser):
         # Review 12, AC29-05/10: a source switch needs consent and removes the automatic values of the old source
         self.page.select_option("#hs-source", "emsesp_rest")
         self.page.fill("#hs-host", "192.168.178.69")
-        expect(self.page.locator("#hs-switch-box")).to_contain_text("Manuell hinterlegte Werte bleiben bestehen")
+        sw = self.page.locator("#hs-switch-box")
+        expect(sw).to_contain_text("Manuell hinterlegte Werte und Werte ohne bestätigte Herkunft bleiben bestehen")
+        expect(sw).to_contain_text("über Home Assistant, künftig")
+        expect(sw).to_contain_text("über EMS-ESP 192.168.178.69")
+        expect(sw).to_contain_text("automatisch verwaltete Werte")
         self.page.locator("#plant-form").evaluate("f => f.requestSubmit()")
         expect(self.page.locator("#notice")).to_contain_text("bestätigen")
         self.assertEqual(self.v2()["building"]["heat_source"]["source"], "ha")
@@ -798,6 +802,29 @@ class MobileTests(V2Browser):
         cfg = self.v2()
         self.assertEqual(cfg["building"]["heat_source"]["source"], "emsesp_rest")
         self.assertEqual(cfg["circuits"][0]["entities"]["flow"], "")
+
+    def test_ab029_existing_value_only_adopted_explicitly(self):
+        """Review 13, AC13-04: equal existing value is not taken over silently; explicit action needed."""
+        import devices
+        cfg = self.seed(rooms=("Wohnzimmer",))
+        for sid, f in devices.entities({"profile": "buderus-emsesp-hmc310", "source": "ha"}).items():
+            self.entities.append(ent(sid, f["label"], "radiator" if f["key"] == "heating_type" else "1", f["unit"], ""))
+        cfg["circuits"][0]["emitter_type"] = "radiators"
+        cfg["building"]["heat_source"] = {"profile": "buderus-emsesp-hmc310", "source": "ha", "emsesp_host": ""}
+        self.put_v2(cfg)
+        server.sample()
+        server.autofill_from_source()
+        self.assertNotIn("circuit.emitter_type", self.v2()["building"]["heat_source"]["autofilled"])
+        self.open()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        box = self.page.locator("#hs-autofill-box")
+        expect(box.locator(".autofill-matches_unconfirmed")).to_contain_text("Herkunft nicht bestätigt · automatische Nachführung aus")
+        expect(box.locator(".autofill-matches_unconfirmed")).to_contain_text("Heizflächenart Heizkreis")
+        self.page.click("#hs-adopt-existing")
+        expect(self.page.locator("#adopt-confirm")).to_contain_text("künftig automatisch")
+        self.page.locator("#adopt-confirm .confirm-ok").click()
+        expect(self.page.locator("#notice")).to_contain_text("automatisch nachgeführt")
+        self.assertIn("adopted_by_installer", self.v2()["building"]["heat_source"]["autofilled"]["circuit.emitter_type"])
 
     def test_ab022_partial_match_is_hint_only(self):
         self.seed(rooms=("Wohnzimmer",))
