@@ -820,11 +820,41 @@ class MobileTests(V2Browser):
         box = self.page.locator("#hs-autofill-box")
         expect(box.locator(".autofill-matches_unconfirmed")).to_contain_text("Herkunft nicht bestätigt · automatische Nachführung aus")
         expect(box.locator(".autofill-matches_unconfirmed")).to_contain_text("Heizflächenart Heizkreis")
+        # AC14-01: unsaved input is never discarded; no API call
+        self.page.fill("#b-outdoor", "-12")
+        self.page.click("#hs-adopt-existing")
+        expect(self.page.locator("#notice")).to_contain_text("zuerst speichern")
+        expect(self.page.locator("#adopt-confirm")).to_have_count(0)
+        expect(self.page.locator("#b-outdoor")).to_have_value("-12")
+        with server.connect() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM config_history WHERE kind='autofill_adopt'").fetchone()[0], 0)
+        self.page.fill("#b-outdoor-ref", "Heizlastberechnung")
+        self.page.locator("#plant-form button[type=submit]").first.click()        # like the installer: field loses focus first
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        self.assertEqual(self.v2()["building"]["design_outdoor_c"], -12)
+        # AC14-02: device value gone between display and confirmation -> honest message, nothing recorded
         self.page.click("#hs-adopt-existing")
         expect(self.page.locator("#adopt-confirm")).to_contain_text("künftig automatisch")
+        for e in self.entities:
+            if e["entity_id"] == "select.thermostat_hc1_heatingtype":
+                e["state"] = "unavailable"
+        server.sample()
         self.page.locator("#adopt-confirm .confirm-ok").click()
-        expect(self.page.locator("#notice")).to_contain_text("automatisch nachgeführt")
+        expect(self.page.locator("#notice")).to_contain_text("Keine Werte übernommen")
+        self.assertNotIn("circuit.emitter_type", self.v2()["building"]["heat_source"]["autofilled"])
+        with server.connect() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM config_history WHERE kind='autofill_adopt'").fetchone()[0], 0)
+        for e in self.entities:
+            if e["entity_id"] == "select.thermostat_hc1_heatingtype":
+                e["state"] = "radiator"
+        server.sample()
+        self.page.reload()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        self.page.click("#hs-adopt-existing")
+        self.page.locator("#adopt-confirm .confirm-ok").click()
+        expect(self.page.locator("#notice")).to_contain_text("Künftig automatisch nachgeführt: Heizflächenart Heizkreis")
         self.assertIn("adopted_by_installer", self.v2()["building"]["heat_source"]["autofilled"]["circuit.emitter_type"])
+        expect(self.page.locator("#b-outdoor")).to_have_value("-12")
 
     def test_ab022_partial_match_is_hint_only(self):
         self.seed(rooms=("Wohnzimmer",))

@@ -330,7 +330,7 @@ def heat_source_snapshot(now=None):
         "source":source.get("source"),"source_errors":HEAT_SOURCE_STATUS["errors"] if source.get("source")=="emsesp_rest" else {},
         "fields":items,"rooms":rooms,"read_only":True}
 
-AUTOFILL_STATUS={"at":None,"ok_at":None,"changed":[]}
+AUTOFILL_STATUS={"at":None,"ok_at":None,"identity":None,"ok_identity":None,"changed":[]}
 
 def _profile_values(cfg,now):
     """Currently valid readings of the profile entities: {field key: {entity_id, value}}."""
@@ -354,8 +354,9 @@ def autofill_from_source(now=None):
         before=json.dumps(cfg,sort_keys=True);previous=json.loads(before)
         values=_profile_values(cfg,now)
         changed=devices.autofill(cfg,values,now.isoformat(),local_date(now))
-        AUTOFILL_STATUS.update(at=now.isoformat(),changed=changed)
-        if values:AUTOFILL_STATUS["ok_at"]=now.isoformat()   # last check with valid profile readings
+        identity=list(devices.source_identity(cfg))
+        AUTOFILL_STATUS.update(at=now.isoformat(),identity=identity,changed=changed)
+        if values:AUTOFILL_STATUS.update(ok_at=now.isoformat(),ok_identity=identity)   # AC14-03: bound to the source
         if json.dumps(cfg,sort_keys=True)==before:return changed
         cfg=model.validate(cfg)
         with connect() as c:
@@ -369,8 +370,11 @@ def autofill_from_source(now=None):
 def autofill_report(now=None):
     """Persistent status of every auto field, derived from configuration and current readings."""
     cfg=load_v2()
-    hs=heat_source(cfg)
-    return {"checked_at":AUTOFILL_STATUS["at"],"checked_ok_at":AUTOFILL_STATUS["ok_at"],"last_changes":AUTOFILL_STATUS["changed"],
+    hs=heat_source(cfg);identity=list(devices.source_identity(cfg))
+    same=lambda key:AUTOFILL_STATUS[key]==identity    # AC14-03: never show a check of another source
+    return {"checked_at":AUTOFILL_STATUS["at"] if same("identity") else None,
+        "checked_ok_at":AUTOFILL_STATUS["ok_at"] if same("ok_identity") else None,
+        "last_changes":AUTOFILL_STATUS["changed"] if same("identity") else [],
         "profile_label":(devices.profile(hs.get("profile")) or {}).get("label"),"source":hs.get("source"),"gateway":devices.gateway(hs),
         "circuit_id":(devices.bound_circuit(cfg) or {}).get("id"),
         "fields":devices.autofill_status(cfg,_profile_values(cfg,now or utcnow()))}

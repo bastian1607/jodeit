@@ -622,14 +622,24 @@ async function renderAutofill(hs){
     p.textContent=list[0].text+': '+list.map(f=>f.label+(k==='auto'&&f.changed_at?' (Stand '+dateText(f.changed_at)+')':'')).join(', ');box.append(p);
     if(k==='matches_unconfirmed'){   // AC13-04: only by explicit installer action
       const b=document.createElement('button');b.type='button';b.id='hs-adopt-existing';b.textContent='Diese Werte künftig automatisch nachführen …';
-      b.addEventListener('click',()=>inlineConfirm(box,{id:'adopt-confirm',text:'Die vorhandenen Werte ('+list.map(f=>f.label).join(', ')+') stimmen mit der Anlage überein. Sie werden künftig automatisch an Änderungen am Regler angepasst und bei einem Quellenwechsel neu übernommen.',ok:'Automatisch nachführen',
-        run:async()=>{await api('v2/heat-source/autofill/adopt','POST',{paths:list.map(f=>f.path),confirmed:true});notice('Werte werden künftig automatisch nachgeführt.');cfg=await api('v2/config');saved=clone(cfg);showPlant()}}));
+      b.addEventListener('click',()=>{
+        // AC14-01: never discard unsaved form input; no API call while the form has changes
+        if(plantDirty){notice('Bitte Anlagenangaben zuerst speichern oder Änderungen verwerfen. Es wurde nichts übernommen.',true);return}
+        inlineConfirm(box,{id:'adopt-confirm',text:'Die vorhandenen Werte ('+list.map(f=>f.label).join(', ')+') stimmen mit der Anlage überein. Sie werden künftig automatisch an Änderungen am Regler angepasst und bei einem Quellenwechsel neu übernommen.',ok:'Automatisch nachführen',
+        run:async()=>{
+          if(plantDirty){notice('Bitte Anlagenangaben zuerst speichern oder Änderungen verwerfen. Es wurde nichts übernommen.',true);return}
+          const r=await api('v2/heat-source/autofill/adopt','POST',{paths:list.map(f=>f.path),confirmed:true});
+          // AC14-02: report what really happened
+          const done=r.adopted||[],rest=list.map(f=>f.label).filter(l=>!done.includes(l));
+          if(!done.length)notice('Keine Werte übernommen. Anlagenwerte oder Datenquelle erneut prüfen.',true);
+          else notice('Künftig automatisch nachgeführt: '+done.join(', ')+(rest.length?'. Nicht übernommen (Anlagenwert weicht ab oder fehlt): '+rest.join(', '):'')+'.',Boolean(rest.length));
+          cfg=await api('v2/config');saved=clone(cfg);showPlant()}})});
       box.append(b);
     }
   }
   const n=document.createElement('p');n.className='hint';
   n.textContent='Leere Felder werden automatisch gefüllt und bei Änderungen am Regler aktualisiert. Manuell hinterlegte Werte werden nie überschrieben. Es wird nichts an die Anlage gesendet.'
-    +(s.checked_ok_at?' Letzte erfolgreiche Profilprüfung: '+dateText(s.checked_ok_at)+'.':' Noch keine erfolgreiche Profilprüfung.')
+    +(s.checked_ok_at?' Letzte Abfrage mit gültigen Profilwerten für '+sourceName(s)+': '+dateText(s.checked_ok_at)+'.':' Noch keine Abfrage mit gültigen Profilwerten für '+sourceName(s)+'.')
     +(s.checked_at&&s.checked_at!==s.checked_ok_at?' Letzter Versuch ohne gültige Werte: '+dateText(s.checked_at)+'.':'');
   box.append(n);root.append(box);
   // Review 12, AC29-01: the controller's minimum outdoor temperature is shown separately, never adopted.
@@ -978,6 +988,7 @@ function sensorFreshness(s){
   return t;
 }
 let autofillFields=[];
+function sourceName(s){return (s.profile_label||'Geräteprofil')+(s.source==='emsesp_rest'?' über EMS-ESP '+(s.gateway||''):' über Home Assistant')}
 let sessionsRender=0;
 async function renderSessions(){
   const root=el('session-panel');if(!root)return;

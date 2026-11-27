@@ -360,6 +360,38 @@ class AutofillTests(unittest.TestCase):
         cfg["building"]["heat_source"]["emsesp_host"] = " 192.168.178.70 "
         self.save_ui(cfg)
 
+    def test_ac14_02_adoption_with_changed_device_value_records_nothing(self):
+        cfg = self.config()
+        cfg["circuits"][0]["emitter_type"] = "radiators"
+        server.save_v2(cfg)
+        self.plant["select.thermostat_hc1_heatingtype"] = "unavailable"
+        with patch.object(server, "get_entities", side_effect=self.states):
+            server.sample()
+            self.assertEqual(server.adopt_autofill({"paths": ["circuit.emitter_type"], "confirmed": True}), {"adopted": []})
+        self.assertNotIn("circuit.emitter_type", server.load_v2()["building"]["heat_source"]["autofilled"])
+        with server.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM config_history WHERE kind='autofill_adopt'").fetchone()[0], 0)
+
+    def test_ac14_03_check_time_bound_to_source(self):
+        server.save_v2(self.config())
+        self.run_autofill()
+        with patch.object(server, "get_entities", side_effect=self.states):
+            r = server.autofill_report()
+        self.assertIsNotNone(r["checked_ok_at"])
+        self.assertEqual((r["source"], r["gateway"]), ("ha", ""))
+        cfg = server.load_v2()
+        cfg["building"]["heat_source"].update(source="emsesp_rest", emsesp_host="192.168.178.69", switch_confirmed=True)
+        self.save_ui(cfg)
+        def down(host, device):
+            raise OSError("no route")
+        with patch.object(server, "get_entities", side_effect=self.states), patch.object(devices, "fetch_device", side_effect=down):
+            server.sample()
+            server.autofill_from_source()
+            r = server.autofill_report()
+        self.assertIsNone(r["checked_ok_at"])                     # B not reachable: no success of A shown for B
+        self.assertIsNotNone(r["checked_at"])
+        self.assertEqual(r["gateway"], "192.168.178.69")
+
     def test_ac09_no_profile_and_no_write_path(self):
         server.save_v2(model.empty())
         with patch.object(server, "get_entities", side_effect=self.states):
