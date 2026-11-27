@@ -29,15 +29,25 @@
   Neustart nicht verlängert. Laufende Messungen werden nie automatisch gelöscht. Hinweise 7 Tage vorher (wenn
   nicht archiviert) und am letzten Tag. Verpasste Fristen werden beim nächsten Start nachgeholt.
 - Messwerte außerhalb von Messungen, Konfigurationsverlauf und App-Ereignisse werden nach 30 Tagen gelöscht.
-- „Messung löschen“ (Bezeichnung zur Bestätigung eingeben) und „Gerät für neuen Kunden zurücksetzen“ in Schritt 5.
-- Physische Bereinigung: `PRAGMA secure_delete`, WAL-Checkpoint und `VACUUM`. Lokale Datenbanksicherungen in
-  `/data/backups`, die eine gelöschte Messung enthalten können, werden mit entfernt.
-- Löschregister ohne personenbezogene Daten in `/share/autobalance/geloeschte-messungen.json` (dafür ist der
-  Ordner `share` eingebunden): Nach Wiederherstellung einer reinen App-Sicherung löscht die App bereits gelöschte
-  Messungen beim Start erneut.
-- **Grenzen:** Home-Assistant-Sicherungen (vollständig oder App) enthalten den Datenstand zum Sicherungszeitpunkt.
-  Deren Aufbewahrung und Löschung liegt bei Home Assistant bzw. dem Betreiber. Wird eine Vollsicherung inklusive
-  `share` wiederhergestellt, gilt das Register dieses Zeitpunkts; Fristen werden trotzdem nachgeholt.
+- „Messung jetzt vom Messgerät löschen …“ (Bezeichnung eingeben) und „Messgerät für nächsten Kunden vorbereiten …“
+  in Schritt 5, jeweils als Formular im Seiteninhalt mit „Vorgang abbrechen“. Das Vorbereiten löscht immer alle
+  Messungen; Messungen ohne bestätigte Ablage in der Kundenakte nur nach ausdrücklicher Bestätigung (sonst
+  bleibt alles unverändert).
+- Physische Bereinigung: `PRAGMA secure_delete`, WAL-Checkpoint und `VACUUM`. Lokale App-Sicherungen in
+  `/data/backups` werden **nicht nach Dateidatum gelöscht**, sondern bereinigt: gelöschte und abgelaufene Messungen
+  per Messungs-ID (bei alten Schemata per Messzeitraum aus dem Löschprotokoll) sowie lose Daten > 30 Tage,
+  danach `VACUUM` der Sicherung. Nur beim bestätigten Vorbereiten für den nächsten Kunden werden sie entfernt.
+- Löschregister ohne personenbezogene Daten (ID, Zeitpunkt, Grund) in `/share/autobalance/geloeschte-messungen.json`
+  (dafür ist der Ordner `share` eingebunden): Nach Wiederherstellung einer reinen App-Sicherung löscht die App
+  bereits gelöschte Messungen beim Start erneut. Ein beschädigtes Register wird beiseitegelegt und aus dem
+  Löschprotokoll neu aufgebaut; ist `/share` nicht beschreibbar, zeigt die Übersicht einen Hinweis.
+- Fehler eines Löschlaufs bleiben in der Übersicht sichtbar (`GET api/v2/retention` → `status`), bis ein späterer
+  Lauf erfolgreich war. Neuer Versuch stündlich.
+- **Grenzen:** Home-Assistant-Sicherungen (vollständig oder App) enthalten den Datenstand zum Sicherungszeitpunkt;
+  die App liest oder löscht sie nicht. Deren Aufbewahrung liegt beim Betreiber (Messkoffer: Betriebsprozess).
+  Wird eine Vollsicherung inklusive `share` wiederhergestellt, gilt das Register dieses Zeitpunkts: abgelaufene
+  Messungen werden beim Start erneut gelöscht, früher manuell gelöschte erscheinen bis zu ihrer ursprünglichen Frist
+  wieder.
 
 ## Änderungen in v0.4.0 (freigegeben 27.11.2026)
 

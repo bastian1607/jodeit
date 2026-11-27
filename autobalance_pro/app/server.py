@@ -53,6 +53,11 @@ def setup():
             if name not in columns:c.execute(f"ALTER TABLE sessions ADD COLUMN {name} TEXT")
         # AB-026: minimal deletion log without personal data (random job id, time, reason, counts).
         c.execute("CREATE TABLE IF NOT EXISTS deletion_log (id INTEGER PRIMARY KEY, session_ref TEXT NOT NULL, deleted_at TEXT NOT NULL, reason TEXT NOT NULL, samples_deleted INTEGER NOT NULL, backups_deleted INTEGER NOT NULL)")
+        # Review 7: job window (no personal data) to clean old-schema app backups; persistent purge status.
+        dl_cols={row[1] for row in c.execute("PRAGMA table_info(deletion_log)")}
+        for col in ("started_at","ended_at"):
+            if col not in dl_cols:c.execute(f"ALTER TABLE deletion_log ADD COLUMN {col} TEXT")
+        c.execute("CREATE TABLE IF NOT EXISTS retention_state (id INTEGER PRIMARY KEY CHECK(id=1), last_run TEXT, last_ok TEXT, errors TEXT NOT NULL DEFAULT '[]', register TEXT)")
     sync_config()
     with LOCK, connect() as c:
         if not c.execute("SELECT 1 FROM config_history LIMIT 1").fetchone():
@@ -454,10 +459,11 @@ def _backup_files():
     folder=Path(DB).parent/"backups"
     return sorted(folder.glob("*.db")) if folder.exists() else []
 
-def _compact():
-    """Make deleted rows physically disappear from the database files (WAL and free pages)."""
-    c=sqlite3.connect(DB,timeout=30)
+def _compact(path=None):
+    """Make deleted rows physically disappear from the database file (WAL and free pages)."""
+    c=sqlite3.connect(path or DB,timeout=30)
     try:
+        c.execute("PRAGMA secure_delete=ON")
         c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         c.execute("VACUUM")
         c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -467,11 +473,86 @@ def deleted_info(sid):
     with connect() as c:r=c.execute("SELECT deleted_at,reason FROM deletion_log WHERE session_ref=? ORDER BY id DESC LIMIT 1",(sid,)).fetchone()
     return {"deleted_at":r[0],"reason":r[1]} if r else None
 
+def retention_state():
+    with connect() as c:r=c.execute("SELECT last_run,last_ok,errors,register FROM retention_state WHERE id=1").fetchone()
+    if not r:return {"last_run":None,"last_ok":None,"errors":[],"register":None,"register_text":None}
+    return {"last_run":r[0],"last_ok":r[1],"errors":json.loads(r[2] or "[]"),"register":r[3],
+        "register_text":retention.REGISTER_STATUS_TEXT.get(r[3]) if r[3] else None}
+
+def _set_state(**kw):
+    with connect() as c:
+        c.execute("INSERT OR IGNORE INTO retention_state(id,errors) VALUES(1,'[]')")
+        for k,v in kw.items():
+            c.execute(f"UPDATE retention_state SET {k}=? WHERE id=1",(json.dumps(v,ensure_ascii=False) if k=="errors" else v,))
+
+def _sync_register(now):
+    """Write every locally logged deletion to the register outside /data. Status is persisted."""
+    with connect() as c:log=[{"id":r[0],"deleted_at":r[1],"reason":r[2]} for r in c.execute("SELECT session_ref,deleted_at,reason FROM deletion_log ORDER BY id")]
+    status=retention.write_register(log,stamp=now.strftime("%Y%m%dT%H%M%SZ")) if log else retention.read_register_status()[1]
+    _set_state(register=status)
+    if status=="unavailable":logging.warning("Löschregister nicht beschreibbar")
+    return status
+
+def _deletion_targets(now):
+    """Ids and time windows of jobs that must not survive in any copy on this device."""
+    with connect() as c:rows=c.execute("SELECT session_ref,started_at,ended_at FROM deletion_log").fetchall()
+    ids={r[0] for r in rows}|{x["id"] for x in retention.read_register()}
+    windows=[(r[1],r[2]) for r in rows if r[1] and r[2]]
+    return ids,windows
+
+def sanitize_backup(path,now=None):
+    """Remove deleted or expired jobs and expired loose data from one local app backup (review 7).
+
+    The file is never judged by its modification time. Jobs are matched by id; for backups from
+    schemas without ``session_id`` the job windows from the deletion log are used. Returns counts."""
+    now=now or utcnow()
+    ids,windows=_deletion_targets(now)
+    limit=(now-timedelta(days=retention.LOOSE_DATA_DAYS)).isoformat()
+    c=sqlite3.connect(str(path),timeout=10)
+    removed={"jobs":0,"samples":0}
+    try:
+        c.execute("PRAGMA secure_delete=ON")
+        tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "sessions" in tables:
+            scols={r[1] for r in c.execute("PRAGMA table_info(sessions)")}
+            for sid,st,en,due in c.execute("SELECT id,started_at,ended_at,"+("delete_due_at" if "delete_due_at" in scols else "NULL")+" FROM sessions").fetchall():
+                expired=en is not None and (due or retention.due_at(coverage.parse(en)).isoformat())<=now.isoformat()
+                if sid in ids or expired:
+                    ids.add(sid)
+                    if st and en:windows.append((st,en))
+            for sid in ids:removed["jobs"]+=c.execute("DELETE FROM sessions WHERE id=?",(sid,)).rowcount
+        if "samples" in tables:
+            cols={r[1] for r in c.execute("PRAGMA table_info(samples)")}
+            if "session_id" in cols:
+                for sid in ids:removed["samples"]+=c.execute("DELETE FROM samples WHERE session_id=?",(sid,)).rowcount
+                loose="session_id IS NULL AND "
+            else:loose=""
+            for st,en in windows:removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}at>=? AND at<=?",(st,en)).rowcount
+            removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}at<?",(limit,)).rowcount
+        if "config_history" in tables:
+            for st,en in windows:c.execute("DELETE FROM config_history WHERE at>=? AND at<=?",(st,en))
+        if "app_events" in tables:c.execute("DELETE FROM app_events WHERE at<?",(limit,))
+        c.commit()
+    finally:c.close()
+    _compact(str(path))
+    return removed
+
+def _sanitize_all_backups(now,errors):
+    cleaned=0
+    for f in _backup_files():
+        try:
+            r=sanitize_backup(f,now)
+            cleaned+=1 if r["jobs"] or r["samples"] else 0
+        except Exception:
+            logging.exception("Lokale App-Sicherung konnte nicht bereinigt werden")
+            errors.append({"code":"backup","text":"Lokale App-Sicherung "+f.name+" konnte nicht bereinigt werden.","at":now.isoformat()})
+    return cleaned
+
 def delete_session(sid,reason,now=None,compact=True):
     """Delete one stopped job completely: its samples, snapshots, frozen report, name and note.
 
-    Local SQLite backups created after the job started may contain its data and are removed too.
-    Other jobs are untouched (their samples carry their own session_id). Returns the log entry."""
+    Other jobs are untouched (their samples carry their own session_id). Local app backups are
+    cleaned of this job record by record; no backup file is deleted. Returns the log entry."""
     now=now or utcnow()
     with LOCK:
         s=get_session(sid)
@@ -480,55 +561,67 @@ def delete_session(sid,reason,now=None,compact=True):
         with connect() as c:
             n=c.execute("DELETE FROM samples WHERE session_id=?",(sid,)).rowcount
             c.execute("DELETE FROM sessions WHERE id=?",(sid,))
-        removed=0
-        start=coverage.parse(s["started_at"])
-        for f in _backup_files():
-            if datetime.fromtimestamp(f.stat().st_mtime,timezone.utc)>=start:
-                f.unlink(missing_ok=True);removed+=1
-        entry={"session_ref":sid,"deleted_at":now.isoformat(),"reason":reason,"samples_deleted":n,"backups_deleted":removed}
-        with connect() as c:c.execute("INSERT INTO deletion_log(session_ref,deleted_at,reason,samples_deleted,backups_deleted) VALUES(?,?,?,?,?)",
-            (sid,entry["deleted_at"],reason,n,removed))
-        retention.append_register({"id":sid,"deleted_at":entry["deleted_at"],"reason":reason})
+            c.execute("INSERT INTO deletion_log(session_ref,deleted_at,reason,samples_deleted,backups_deleted,started_at,ended_at) VALUES(?,?,?,?,?,?,?)",
+                (sid,now.isoformat(),reason,n,0,s["started_at"],s["ended_at"]))
+            log_id=c.execute("SELECT last_insert_rowid()").fetchone()[0]
+        errors=[]
+        cleaned=_sanitize_all_backups(now,errors)
+        with connect() as c:c.execute("UPDATE deletion_log SET backups_deleted=? WHERE id=?",(cleaned,log_id))
+        register=_sync_register(now)
+        if errors:_set_state(errors=retention_state()["errors"]+errors)
         if compact:_compact()
     log_event("session_deleted",sid)
-    logging.info("Messung %s gelöscht (%s): %s Messwerte, %s lokale Sicherungen",sid,reason,n,removed)
-    return entry
+    logging.info("Messung %s gelöscht (%s): %s Messwerte, %s App-Sicherungen bereinigt",sid,reason,n,cleaned)
+    return {"session_ref":sid,"deleted_at":now.isoformat(),"reason":reason,"samples_deleted":n,"backups_cleaned":cleaned,"register":register}
 
 def purge(now=None):
-    """Delete jobs past their deadline and loose data older than 30 days. Safe to run any time;
-    catches up missed deadlines after downtime (AC-026-05)."""
+    """Delete jobs past their deadline and loose data older than 30 days; clean local app backups.
+    Safe to run any time; catches up missed deadlines after downtime (AC-026-05). Errors are kept
+    as a persistent status until a later run succeeds (retried hourly)."""
     now=now or utcnow()
-    done=[]
+    done=[];errors=[]
     with LOCK:
         with connect() as c:
             due=[r[0] for r in c.execute("SELECT id FROM sessions WHERE ended_at IS NOT NULL AND delete_due_at<=?",(now.isoformat(),))]
         for sid in due:
             try:done.append(delete_session(sid,"frist",now,compact=False))
-            except Exception:logging.exception("Automatische Löschung fehlgeschlagen")   # no personal data in the log
+            except Exception:
+                logging.exception("Automatische Löschung fehlgeschlagen")   # no personal data in the log
+                errors.append({"code":"job","text":"Eine fällige Messung konnte nicht gelöscht werden. Neuer Versuch in einer Stunde.","at":now.isoformat()})
         limit=(now-timedelta(days=retention.LOOSE_DATA_DAYS)).isoformat()
-        with connect() as c:
-            loose=c.execute("DELETE FROM samples WHERE session_id IS NULL AND at<?",(limit,)).rowcount
-            newest=c.execute("SELECT MAX(id) FROM config_history").fetchone()[0]
-            active=c.execute("SELECT MIN(started_at) FROM sessions WHERE ended_at IS NULL").fetchone()[0]
-            keep_from=min(limit,active) if active else limit   # a running job still needs its change history
-            c.execute("DELETE FROM config_history WHERE at<? AND id<>?",(keep_from,newest or -1))
-            c.execute("DELETE FROM app_events WHERE at<?",(limit,))
-        old=0
-        for f in _backup_files():
-            if datetime.fromtimestamp(f.stat().st_mtime,timezone.utc)<now-timedelta(days=retention.LOOSE_DATA_DAYS):
-                f.unlink(missing_ok=True);old+=1
-        if done or loose or old:_compact()
-    return {"jobs":done,"loose_samples":loose,"old_backups":old}
+        loose=0
+        try:
+            with connect() as c:
+                loose=c.execute("DELETE FROM samples WHERE session_id IS NULL AND at<?",(limit,)).rowcount
+                newest=c.execute("SELECT MAX(id) FROM config_history").fetchone()[0]
+                active=c.execute("SELECT MIN(started_at) FROM sessions WHERE ended_at IS NULL").fetchone()[0]
+                keep_from=min(limit,active) if active else limit   # a running job still needs its change history
+                c.execute("DELETE FROM config_history WHERE at<? AND id<>?",(keep_from,newest or -1))
+                c.execute("DELETE FROM app_events WHERE at<?",(limit,))
+        except Exception:
+            logging.exception("Bereinigung loser Daten fehlgeschlagen")
+            errors.append({"code":"loose","text":"Messwerte außerhalb von Messungen konnten nicht bereinigt werden.","at":now.isoformat()})
+        cleaned=_sanitize_all_backups(now,errors)
+        if done or loose:
+            try:_compact()
+            except Exception:
+                logging.exception("Datenbank konnte nicht verdichtet werden")
+                errors.append({"code":"compact","text":"Gelöschte Daten konnten nicht physisch entfernt werden (VACUUM).","at":now.isoformat()})
+        _sync_register(now)
+        _set_state(last_run=now.isoformat(),errors=errors,**({} if errors else {"last_ok":now.isoformat()}))
+    return {"jobs":done,"loose_samples":loose,"backups_cleaned":cleaned,"errors":errors}
 
 def apply_register():
     """After an app-only restore: delete jobs again that were deleted before (register outside /data)."""
-    for entry in retention.read_register():
+    entries,status=retention.read_register_status()
+    _set_state(register=status)
+    for entry in entries:
         if get_session(entry["id"]):
             try:delete_session(entry["id"],"erneut nach Wiederherstellung")
             except ValueError:logging.warning("Wiederhergestellte Messung läuft noch und wird nicht gelöscht")
 
 def archive_session(sid,now=None):
-    """Technician confirms that report/CSV are stored in the customer file. Does not move the deadline."""
+    """Technician confirms that report and data are stored in the customer file. Does not move the deadline."""
     with LOCK:
         s=get_session(sid) if isinstance(sid,str) else None
         if not s:raise ValueError("Messung nicht gefunden")
@@ -536,19 +629,26 @@ def archive_session(sid,now=None):
         with connect() as c:c.execute("UPDATE sessions SET archived_at=COALESCE(archived_at,?) WHERE id=?",((now or utcnow()).isoformat(),sid))
     return get_session(sid)
 
+class UnarchivedJobs(ValueError):
+    def __init__(self,jobs):
+        super().__init__("Nicht in der Kundenakte bestätigte Messungen: "+", ".join(j["name"] for j in jobs)+". Löschen ausdrücklich bestätigen.")
+        self.jobs=jobs
+
 RESET_WORD="NEUER KUNDE"
 def reset_for_new_customer(data,now=None):
-    """AB-026 item 4: clear the current customer before the device is installed elsewhere.
+    """Prepare the measuring device for the next customer (review 7).
 
-    Clears configuration, configuration history, passive samples and local backups. Stopped jobs stay
-    (isolated, with their deadline) unless ``delete_jobs`` is set. Not allowed while a job runs."""
+    Deletes every stopped job, configuration, configuration history, passive samples and the local
+    app backups. All or nothing: refused while a job runs, and refused without ``allow_unarchived``
+    if a job has no confirmed filing in the customer file. Validation happens before anything is deleted."""
     if not isinstance(data,dict) or data.get("confirm")!=RESET_WORD:raise ValueError(f"Zur Bestätigung „{RESET_WORD}“ eingeben")
     now=now or utcnow()
     with LOCK:
-        if list_sessions()["active"]:raise ValueError("Laufende Messung zuerst stoppen")
-        deleted=[]
-        if data.get("delete_jobs") is True:
-            for s in list_sessions()["sessions"]:deleted.append(delete_session(s["id"],"zurückgesetzt",now,compact=False))
+        sessions=list_sessions()
+        if sessions["active"]:raise ValueError("Laufende Messung zuerst stoppen")
+        open_jobs=[{"id":s["id"],"name":s["name"],"ended_at":s["ended_at"]} for s in sessions["sessions"] if not s["archived_at"]]
+        if open_jobs and data.get("allow_unarchived") is not True:raise UnarchivedJobs(open_jobs)
+        deleted=[delete_session(s["id"],"zurückgesetzt",now,compact=False) for s in sessions["sessions"]]
         empty_cfg=model.empty()
         with connect() as c:
             loose=c.execute("DELETE FROM samples WHERE session_id IS NULL").rowcount
@@ -556,10 +656,12 @@ def reset_for_new_customer(data,now=None):
             c.execute("DELETE FROM acquisition")
             _write_config(c,empty_cfg)
             c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(now.isoformat(),"reset",json.dumps(empty_cfg)))
-        for f in _backup_files():f.unlink(missing_ok=True)
+        removed=0
+        for f in _backup_files():   # explicitly confirmed by the technician; listed in the reset form
+            f.unlink(missing_ok=True);removed+=1
         _compact()
     log_event("reset",None)
-    return {"jobs_deleted":len(deleted),"loose_samples":loose}
+    return {"jobs_deleted":len(deleted),"loose_samples":loose,"backups_removed":removed}
 
 def plant_timezone():
     """Local time zone of the plant for the night definition (AB-014). HA passes TZ to apps."""
@@ -759,14 +861,14 @@ class API(BaseHTTPRequestHandler):
                 "profiles":[{"key":p["key"],"label":p["label"],"verified":p["verified"],"fields":len(p["fields"])} for p in devices.PROFILES.values()]})
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
         if path=="/api/v2/rooms/status":return self.send_json(200,rooms_status())
-        if path=="/api/v2/sessions":return self.send_json(200,list_sessions())
+        if path=="/api/v2/sessions":return self.send_json(200,dict(list_sessions(),retention=retention_state()))
         if path.startswith("/api/v2/sessions/") and path.count("/")==5:
             gone=deleted_info(path.split("/")[4])
             if gone and not get_session(path.split("/")[4]):
                 return self.send_json(410,{"error":"Messung wurde am "+gone["deleted_at"][:10]+" gelöscht","deleted":gone})
         if path=="/api/v2/retention":
-            with connect() as c:log=[dict(zip(("session_ref","deleted_at","reason","samples_deleted","backups_deleted"),r)) for r in c.execute("SELECT session_ref,deleted_at,reason,samples_deleted,backups_deleted FROM deletion_log ORDER BY id DESC LIMIT 50")]
-            return self.send_json(200,{"retention_days":retention.RETENTION_DAYS,"warn_days":list(retention.WARN_DAYS),"log":log,"register":str(retention.REGISTER_DIR)})
+            with connect() as c:log=[dict(zip(("session_ref","deleted_at","reason","samples_deleted","backups_cleaned"),r)) for r in c.execute("SELECT session_ref,deleted_at,reason,samples_deleted,backups_deleted FROM deletion_log ORDER BY id DESC LIMIT 50")]
+            return self.send_json(200,{"retention_days":retention.RETENTION_DAYS,"warn_days":list(retention.WARN_DAYS),"log":log,"register":str(retention.REGISTER_DIR),"status":retention_state()})
         if path.startswith("/api/v2/sessions/") and path.endswith("/report"):
             body=session_report(path.split("/")[4])
             if body is None:return self.send_json(404,{"error":"Messauftrag nicht gefunden"})
@@ -824,7 +926,9 @@ class API(BaseHTTPRequestHandler):
                 if not s:raise ValueError("Messung nicht gefunden")
                 if data.get("confirm")!=s["name"]:raise ValueError("Zur Bestätigung die Bezeichnung der Messung genau eingeben")
                 return self.send_json(200,delete_session(s["id"],"manuell"))
-            if path=="/api/v2/reset":return self.send_json(200,reset_for_new_customer(data))
+            if path=="/api/v2/reset":
+                try:return self.send_json(200,reset_for_new_customer(data))
+                except UnarchivedJobs as ex:return self.send_json(409,{"error":str(ex),"unarchived":ex.jobs})
             if path=="/api/v2/heat-source/test":
                 # Read-only probe of the unsaved selection; stores nothing, sends nothing to the device.
                 if not isinstance(data,dict):raise ValueError("Datenquelle fehlt")

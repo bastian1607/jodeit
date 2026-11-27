@@ -40,28 +40,70 @@ def notice(due, archived, now):
     return None
 
 
-def read_register(directory=None):
-    path = Path(directory or REGISTER_DIR) / REGISTER_FILE
+REGISTER_STATUS_TEXT = {
+    "ok": "Löschregister in /share/autobalance geführt.",
+    "missing": "Löschregister noch nicht angelegt (noch keine Löschung).",
+    "unavailable": "Löschregister in /share/autobalance nicht beschreibbar. Nach einer reinen App-Wiederherstellung "
+                   "werden bereits gelöschte Messungen erst zu ihrer Frist erneut gelöscht.",
+    "corrupt": "Löschregister war beschädigt. Es wurde beiseitegelegt und aus dem Löschprotokoll neu aufgebaut.",
+}
+
+
+def _path(directory=None):
+    return Path(directory or REGISTER_DIR) / REGISTER_FILE
+
+
+def read_register_status(directory=None):
+    """(entries, status) with status "ok", "missing", "unavailable" or "corrupt"."""
+    path = _path(directory)
     try:
-        data = json.loads(path.read_text())
-        return [x for x in data if isinstance(x, dict) and isinstance(x.get("id"), str)]
-    except (OSError, ValueError):
-        return []
+        raw = path.read_text()
+    except FileNotFoundError:
+        return [], "missing"
+    except OSError:
+        return [], "unavailable"
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            raise ValueError("no list")
+    except ValueError:
+        return [], "corrupt"
+    return [x for x in data if isinstance(x, dict) and isinstance(x.get("id"), str)], "ok"
+
+
+def read_register(directory=None):
+    return read_register_status(directory)[0]
+
+
+def write_register(entries, directory=None, stamp=""):
+    """Merge ``entries`` ({id, deleted_at, reason}) into the register. Returns the resulting status.
+
+    A corrupt file is never silently overwritten: it is moved aside first and the register is rebuilt
+    from the existing entries plus ``entries`` (callers pass the full local deletion log)."""
+    folder = Path(directory or REGISTER_DIR)
+    if not folder.parent.exists():
+        return "unavailable"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        current, status = read_register_status(folder)
+        if status == "unavailable":
+            return status
+        if status == "corrupt":
+            _path(folder).replace(folder / f"{REGISTER_FILE}.defekt-{stamp or 'x'}")
+        known = {x["id"] for x in current}
+        merged = list(current)
+        for entry in entries:
+            if entry["id"] not in known:
+                merged.append({"id": entry["id"], "deleted_at": entry["deleted_at"], "reason": entry["reason"]})
+                known.add(entry["id"])
+        tmp = folder / (REGISTER_FILE + ".tmp")
+        tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=1))
+        tmp.replace(_path(folder))
+        return "corrupt" if status == "corrupt" else "ok"
+    except OSError:
+        return "unavailable"
 
 
 def append_register(entry, directory=None):
-    """Add {id, deleted_at, reason} (no personal data). Returns False if the folder is not available."""
-    folder = Path(directory or REGISTER_DIR)
-    if not folder.parent.exists():
-        return False
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        entries = read_register(folder)
-        if not any(x["id"] == entry["id"] for x in entries):
-            entries.append(entry)
-        tmp = folder / (REGISTER_FILE + ".tmp")
-        tmp.write_text(json.dumps(entries, ensure_ascii=False, indent=1))
-        tmp.replace(folder / REGISTER_FILE)
-        return True
-    except OSError:
-        return False
+    """Backward-compatible single append. True if the register holds the entry afterwards."""
+    return write_register([entry], directory) in ("ok", "corrupt")

@@ -965,31 +965,69 @@ async function renderSessions(){
     const b=document.createElement('b');b.textContent=s.name;
     const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.finalized?' · Bericht festgeschrieben':'')+(s.note?' · '+s.note:'');
     const due=document.createElement('div');due.className='job-due';
-    due.append(badge('Automatische Löschung am '+dateText(s.delete_due_at),s.deletion_notice?'bad':''),document.createTextNode(' '),
-      badge(s.archived_at?'In Kundenakte übernommen ('+dateText(s.archived_at)+')':'Noch nicht als archiviert bestätigt',s.archived_at?'good':'warn'));
+    const dueText=document.createElement('p');dueText.className='hint';
+    dueText.textContent='Messdaten auf diesem Gerät werden am '+dateText(s.delete_due_at)+' gelöscht (30 Tage nach Messende). HA-Sicherungen separat berücksichtigen.';
+    due.append(dueText,badge(s.archived_at?'Ablage durch Techniker bestätigt am '+dateText(s.archived_at):'Ablage in Kundenakte noch nicht bestätigt',s.archived_at?'good':'warn'));
+    if(s.deletion_notice)due.append(document.createTextNode(' '),badge(daysLeftText(s.delete_due_at),s.archived_at?'':'warn'));
     const actions=document.createElement('div');actions.className='actions';
-    if(!s.archived_at){const ar=document.createElement('button');ar.type='button';ar.className='job-archive';ar.textContent='Archivierung bestätigen';
-      ar.addEventListener('click',async()=>{if(!confirm('Bestätigen, dass Bericht und CSV von „'+s.name+'“ in der Kundenakte gespeichert sind?\n\nDie automatische Löschung am '+dateText(s.delete_due_at)+' bleibt bestehen.'))return;
-        try{await api('v2/sessions/archive','POST',{id:s.id});notice('Archivierung bestätigt.');renderSessions();stats()}catch(ex){notice(ex.message,true)}});actions.append(ar)}
-    const del=document.createElement('button');del.type='button';del.className='danger job-delete';del.textContent='Messung löschen';
-    del.addEventListener('click',async()=>{const typed=prompt('Messung „'+s.name+'“ mit allen Messwerten und dem Bericht endgültig löschen.\n\nZur Bestätigung die Bezeichnung genau eingeben:');
-      if(typed===null)return;
-      try{await api('v2/sessions/delete','POST',{id:s.id,confirm:typed});notice('Messung gelöscht.');renderSessions();stats()}catch(ex){notice('Nicht gelöscht: '+ex.message,true)}});
+    if(!s.archived_at){const ar=document.createElement('button');ar.type='button';ar.className='job-archive';ar.textContent='Ablage in Kundenakte bestätigen';
+      ar.addEventListener('click',()=>inlineConfirm(row,{id:'archive-confirm',text:'Ich bestätige, dass Bericht und benötigte Messdaten in der Jodeit-Kundenakte gesichert wurden. Die Löschung am '+dateText(s.delete_due_at)+' bleibt bestehen.',ok:'Ablage bestätigen',
+        run:async()=>{await api('v2/sessions/archive','POST',{id:s.id});notice('Ablage bestätigt.');renderSessions();stats()}}));actions.append(ar)}
+    const del=document.createElement('button');del.type='button';del.className='danger job-delete';del.textContent='Messung jetzt vom Messgerät löschen …';
+    del.addEventListener('click',()=>inlineConfirm(row,{id:'delete-confirm',danger:true,
+      text:'Messung „'+s.name+'“ (ID '+s.id+', Messende '+dateText(s.ended_at)+') mit allen Messwerten und dem festgeschriebenen Bericht endgültig vom Messgerät löschen. Kopien in Home-Assistant-Sicherungen werden dadurch nicht gelöscht.',
+      word:s.name,wordLabel:'Zur Bestätigung die Bezeichnung genau eingeben',ok:'Endgültig löschen',
+      run:async(typed)=>{await api('v2/sessions/delete','POST',{id:s.id,confirm:typed});notice('Messung gelöscht.');renderSessions();stats()}}));
     actions.append(del);
     row.append(b,p,due,jobLinks(s),actions);list.append(row)}
   root.append(list);
+  root.append(resetBox(done));
+}
+function daysLeftText(due){const d=Math.max(0,Math.ceil((new Date(due).getTime()-Date.now())/86400000));return 'Noch '+d+(d===1?' Tag':' Tage')+' bis zur Löschung. Sicherung in Kundenakte prüfen.'}
+/* In-page confirmation: nothing happens until "ok"; "Vorgang abbrechen" closes without any change. */
+function inlineConfirm(host,o){
+  host.querySelector('.inline-confirm')?.remove();
+  const box=document.createElement('div');box.className='inline-confirm warn-box';box.id=o.id;
+  const t=document.createElement('p');t.textContent=o.text;box.append(t);
+  if(o.extra)box.append(o.extra);
+  let input=null;
+  if(o.word){const l=document.createElement('label');l.textContent=o.wordLabel;input=document.createElement('input');input.className='confirm-word';input.autocomplete='off';l.append(input);box.append(l)}
+  const act=document.createElement('div');act.className='actions';
+  const ok=document.createElement('button');ok.type='button';ok.className=(o.danger?'danger':'primary')+' confirm-ok';ok.textContent=o.ok;
+  const cancel=document.createElement('button');cancel.type='button';cancel.className='confirm-cancel';cancel.textContent='Vorgang abbrechen';
+  cancel.addEventListener('click',()=>box.remove());
+  ok.addEventListener('click',async()=>{
+    if(o.word&&input.value!==o.word){notice('Bestätigung stimmt nicht überein. Nichts geändert.',true);input.focus();return}
+    if(o.check&&!o.check()){return}
+    ok.disabled=true;try{await o.run(input?input.value:undefined);box.remove()}catch(ex){notice('Nicht ausgeführt: '+ex.message,true)}finally{ok.disabled=false}});
+  act.append(ok,cancel);box.append(act);host.append(box);(input||ok).focus();
+}
+function resetBox(done){
   const reset=document.createElement('details');reset.className='section';reset.id='reset-box';
-  reset.innerHTML='<summary>Gerät für neuen Kunden zurücksetzen</summary><div class="body"><p class="hint">Löscht Räume, Zonen, Heizflächen, Anlagen- und Profilangaben, Konfigurationsverlauf, Messwerte außerhalb von Messungen und lokale Datenbanksicherungen. Abgeschlossene Messungen bleiben bis zu ihrer automatischen Löschung getrennt erhalten, außer du löschst sie hier mit.</p></div>';
-  const rb=document.createElement('button');rb.type='button';rb.className='danger';rb.id='reset-start';rb.textContent='Zurücksetzen …';
+  const sum=document.createElement('summary');sum.textContent='Messgerät für nächsten Kunden vorbereiten …';
+  const body=document.createElement('div');body.className='body';
+  const p=document.createElement('p');p.className='hint';
+  p.textContent='Löscht alle abgeschlossenen Messungen mit Berichten, Räume, Zonen, Heizflächen, Anlagen- und Profilangaben, Konfigurationsverlauf, Messwerte außerhalb von Messungen und die lokalen App-Datenbanksicherungen. Home-Assistant-Sicherungen werden nicht verändert.';
+  body.append(p);
+  const rb=document.createElement('button');rb.type='button';rb.className='danger';rb.id='reset-start';rb.textContent='Messgerät für nächsten Kunden vorbereiten …';
   rb.disabled=Boolean(sessionsData.active);
-  rb.addEventListener('click',async()=>{
-    const typed=prompt('Gerät für einen neuen Kunden zurücksetzen.\n\nZur Bestätigung NEUER KUNDE eingeben:');if(typed===null)return;
-    const jobs=done.length?confirm('Auch die '+done.length+' abgeschlossenen Messungen jetzt löschen?\n\nOK = ja, mitlöschen · Abbrechen = behalten bis zur automatischen Löschung'):false;
-    try{const r=await api('v2/reset','POST',{confirm:typed,delete_jobs:jobs});notice('Gerät zurückgesetzt'+(r.jobs_deleted?' · '+r.jobs_deleted+' Messungen gelöscht':'')+'.');cfg=await api('v2/config');saved=clone(cfg);await loadRoomsStatus();renderSessions();stats()}
-    catch(ex){notice('Nicht zurückgesetzt: '+ex.message,true)}});
-  reset.querySelector('.body').append(rb);
-  if(sessionsData.active){const w=document.createElement('p');w.className='hint';w.textContent='Während einer laufenden Messung nicht möglich.';reset.querySelector('.body').append(w)}
-  root.append(reset);
+  rb.addEventListener('click',()=>{
+    const open=done.filter(s=>!s.archived_at);
+    const extra=document.createElement('div');let allow=null;
+    if(done.length){const ul=document.createElement('ul');ul.id='reset-jobs';
+      for(const s of done){const li=document.createElement('li');li.textContent=s.name+' · Messende '+dateText(s.ended_at)+' · '+(s.archived_at?'Ablage bestätigt':'Ablage NICHT bestätigt');ul.append(li)}
+      extra.append(Object.assign(document.createElement('p'),{textContent:'Folgende Messungen werden gelöscht:'}),ul)}
+    if(open.length){const l=document.createElement('label');l.className='check';allow=document.createElement('input');allow.type='checkbox';allow.id='reset-allow-unarchived';
+      l.append(allow,document.createTextNode(' Auch die '+open.length+' Messungen ohne bestätigte Ablage in der Kundenakte löschen'));extra.append(l)}
+    inlineConfirm(body,{id:'reset-confirm',danger:true,text:'Messgerät für den nächsten Kunden vorbereiten. Alles wird in einem Schritt gelöscht; bei Abbruch bleibt alles unverändert.',
+      extra,word:'NEUER KUNDE',wordLabel:'Zur Bestätigung NEUER KUNDE eingeben',ok:'Jetzt vorbereiten',
+      check:()=>{if(allow&&!allow.checked){notice('Messungen ohne bestätigte Ablage: Löschung ausdrücklich bestätigen.',true);return false}return true},
+      run:async(typed)=>{const r=await api('v2/reset','POST',{confirm:typed,allow_unarchived:Boolean(allow&&allow.checked)});
+        notice('Messgerät vorbereitet'+(r.jobs_deleted?' · '+r.jobs_deleted+' Messungen gelöscht':'')+'.');cfg=await api('v2/config');saved=clone(cfg);await loadRoomsStatus();renderSessions();stats()}});
+  });
+  body.append(rb);
+  if(sessionsData.active){const w=document.createElement('p');w.className='hint';w.textContent='Während einer laufenden Messung nicht möglich.';body.append(w)}
+  reset.append(sum,body);return reset;
 }
 /* Übersicht: Messung direkt beginnen oder stoppen */
 async function renderQuickMeasurement(){
@@ -1011,10 +1049,15 @@ async function renderQuickMeasurement(){
   root.append(box);
   // AB-026: notice before the automatic deletion (7 days if not archived, always on the last day)
   for(const s of d.sessions.filter(x=>x.deletion_notice)){
-    const w=document.createElement('div');w.className='alert error retention-notice';
-    w.textContent='Messung „'+s.name+'“ wird am '+dateText(s.delete_due_at)+' automatisch vom Gerät gelöscht.'+(s.archived_at?'':' Bericht und CSV vorher in die Kundenakte übernehmen und die Archivierung bestätigen (Schritt 5).');
+    const w=document.createElement('div');w.className='alert retention-notice'+(s.archived_at?'':' error');
+    w.textContent='Messung „'+s.name+'“: '+daysLeftText(s.delete_due_at)+(s.archived_at?'':' Ablage in Kundenakte noch nicht bestätigt (Schritt 5).');
     root.append(w);
   }
+  // Review 7: failed deletion runs and register problems stay visible until a later run succeeds.
+  const rs=d.retention||{};
+  if(rs.errors&&rs.errors.length){const w=document.createElement('div');w.className='alert error';w.id='retention-error';
+    w.textContent='Löschlauf mit Fehler ('+dateText(rs.last_run)+'): '+rs.errors.map(x=>x.text).join(' ')+' Automatischer neuer Versuch stündlich.';root.append(w)}
+  if(rs.register==='unavailable'||rs.register==='corrupt'){const w=document.createElement('div');w.className='alert';w.id='retention-register';w.textContent=rs.register_text;root.append(w)}
 }
 /* ---------- AB-014 Aussagekraft des Messauftrags (nur lesend) ---------- */
 const STAGE_KIND={no_data:'warn',insufficient:'bad',unverified:'warn',level:'warn',level_and_slope:'good'};
