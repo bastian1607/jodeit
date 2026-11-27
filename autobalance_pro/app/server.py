@@ -330,34 +330,66 @@ def heat_source_snapshot(now=None):
         "source":source.get("source"),"source_errors":HEAT_SOURCE_STATUS["errors"] if source.get("source")=="emsesp_rest" else {},
         "fields":items,"rooms":rooms,"read_only":True}
 
-AUTOFILL_STATUS={"at":None,"report":None}
+AUTOFILL_STATUS={"at":None,"changed":[]}
+
+def _profile_values(cfg,now):
+    """Currently valid readings of the profile entities: {field key: {entity_id, value}}."""
+    obs={o["entity_id"]:o for o in latest_observations(now)}
+    values={}
+    for sid,f in devices.entities(heat_source(cfg)).items():
+        o=obs.get(sid)
+        if o and o["valid"] and o["state"] not in ("unavailable","unknown",""):
+            values[f["key"]]={"entity_id":sid,"value":o["normalized_value"] if o.get("normalized_value") is not None else o["state"]}
+    return values
 
 def autofill_from_source(now=None):
-    """AB-029: take over everything the read device profile delivers into empty configuration fields.
+    """AB-029: take over what the read device profile delivers into the configuration (read-only towards the device).
 
-    Read-only towards the device. Writes the configuration only when something changes (history kind
-    'autofill'). Values come from the app's own latest valid readings of the profile entities."""
+    Writes only when a value really changes (history kind 'autofill'). The acquisition status is reset only
+    when the measured entities change (review 12). Returns the labels filled or refreshed in this run."""
     now=now or utcnow()
     with LOCK:
-        cfg=load_v2();source=heat_source(cfg)
-        if not devices.profile(source.get("profile")):return None
-        obs={o["entity_id"]:o for o in latest_observations(now)}
-        values={}
-        for sid,f in devices.entities(source).items():
-            o=obs.get(sid)
-            if o and o["valid"] and o["state"] not in ("unavailable","unknown",""):
-                values[f["key"]]={"entity_id":sid,"value":o["normalized_value"] if o.get("normalized_value") is not None else o["state"]}
-        before=json.dumps(cfg,sort_keys=True)
-        cfg,report=devices.autofill(cfg,values,local_date(now))
-        AUTOFILL_STATUS.update(at=now.isoformat(),report=report)
-        if json.dumps(cfg,sort_keys=True)==before:return report
+        cfg=load_v2()
+        if not devices.profile(heat_source(cfg).get("profile")):return None
+        before=json.dumps(cfg,sort_keys=True);previous=json.loads(before)
+        changed=devices.autofill(cfg,_profile_values(cfg,now),now.isoformat(),local_date(now))
+        AUTOFILL_STATUS.update(at=now.isoformat(),changed=changed)
+        if json.dumps(cfg,sort_keys=True)==before:return changed
         cfg=model.validate(cfg)
         with connect() as c:
             _write_config(c,cfg)
             c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(now.isoformat(),"autofill",json.dumps(cfg,ensure_ascii=False)))
-            c.execute("DELETE FROM acquisition")
-    logging.info("AB-029: Anlagendaten übernommen: %s",", ".join(report["filled"]+report["refreshed"]) or "-")
-    return report
+            if wanted(previous)!=wanted(cfg) or temperature_ids(previous)!=temperature_ids(cfg):
+                c.execute("DELETE FROM acquisition")
+    if changed:logging.info("AB-029: Anlagendaten übernommen: %s",", ".join(changed))
+    return changed
+
+def autofill_report(now=None):
+    """Persistent status of every auto field, derived from configuration and current readings."""
+    cfg=load_v2()
+    return {"checked_at":AUTOFILL_STATUS["at"],"last_changes":AUTOFILL_STATUS["changed"],
+        "circuit_id":(devices.bound_circuit(cfg) or {}).get("id"),
+        "fields":devices.autofill_status(cfg,_profile_values(cfg,now or utcnow()))}
+
+def prepare_source_switch(data):
+    """Review 12, P0: on a change of profile, source or circuit no automatic value of the old source may stay.
+
+    Needs ``heat_source.switch_confirmed``; then automatic values are emptied (user values stay) and refilled
+    from the new source. Returns the data to save."""
+    if not isinstance(data,dict) or not isinstance(data.get("building"),dict):return data
+    hs=data["building"].get("heat_source")
+    if not isinstance(hs,dict):return data
+    previous=load_v2();old=heat_source(previous)
+    try:new_circuit=(devices.bound_circuit(data) or {}).get("id")
+    except (AttributeError,TypeError):new_circuit=None
+    switched=(old.get("profile") or "",old.get("source") or "ha",(devices.bound_circuit(previous) or {}).get("id"))!=(hs.get("profile") or "",hs.get("source") or "ha",new_circuit)
+    if not switched:return data
+    paths=devices.auto_values_to_clear(previous,data)
+    if paths and hs.get("switch_confirmed") is not True:
+        raise ValueError("Datenquelle gewechselt: Bitte bestätigen, dass "+str(len(paths))+" automatisch übernommene Werte der bisherigen Quelle entfernt und neu übernommen werden.")
+    devices.clear_auto_values(data,paths)
+    data["building"]["heat_source"]["autofilled"]={}
+    return data
 
 def local_date(now):
     try:return now.astimezone(plant_timezone()).strftime("%d.%m.%Y")
@@ -985,7 +1017,7 @@ class API(BaseHTTPRequestHandler):
             return self.send_json(200,{"sources":devices.SOURCES,"write_enabled":devices.WRITE_ENABLED,
                 "profiles":[{"key":p["key"],"label":p["label"],"verified":p["verified"],"fields":len(p["fields"])} for p in devices.PROFILES.values()]})
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
-        if path=="/api/v2/heat-source/autofill":return self.send_json(200,AUTOFILL_STATUS)
+        if path=="/api/v2/heat-source/autofill":return self.send_json(200,autofill_report())
         if path=="/api/v2/rooms/status":return self.send_json(200,rooms_status())
         if path=="/api/v2/sessions":return self.send_json(200,dict(list_sessions(),retention=retention_state()))
         if path.startswith("/api/v2/sessions/") and path.count("/")==5:
@@ -1069,12 +1101,13 @@ class API(BaseHTTPRequestHandler):
                 shares,reason=model.suggest_load_shares(model.validate_structure(data.get("config")),data["room_id"])
                 return self.send_json(200,{"shares":shares,"reason":reason})
             if path=="/api/config":save_v1(data)
-            else:save_v2(data)
+            else:save_v2(prepare_source_switch(data))
             report=None
             if path=="/api/v2/config" and devices.profile(heat_source(load_v2()).get("profile")):
                 try:
                     sample()                       # read the profile values now, not in up to 5 minutes
-                    report=autofill_from_source()  # AB-029: take over what the device delivers
+                    autofill_from_source()         # AB-029: take over what the device delivers
+                    report=autofill_report()
                 except Exception:logging.exception("Anlagendaten konnten nicht übernommen werden")
             return self.send_json(200,{"saved":True,"autofill":report})
         except (ValueError,TypeError,KeyError,OverflowError,AttributeError) as exc:return self.send_json(400,{"error":str(exc)})

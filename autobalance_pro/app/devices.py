@@ -87,7 +87,7 @@ PROFILES = {
 
 
 def empty_source():
-    return {"profile": "", "source": "ha", "emsesp_host": ""}
+    return {"profile": "", "source": "ha", "emsesp_host": "", "circuit_id": "", "autofilled": {}}
 
 
 def profile(key):
@@ -161,7 +161,14 @@ def validate_source(heat_source):
         host = normalise_host(host)
     elif host:
         host = normalise_host(host)
-    heat_source.update(profile=key, source=source, emsesp_host=host)
+    circuit_id = heat_source.get("circuit_id") or ""
+    if not isinstance(circuit_id, str) or len(circuit_id) > 80:
+        raise ValueError("Heizkreis des Geräteprofils ungültig")
+    autofilled = heat_source.get("autofilled") or {}
+    if not isinstance(autofilled, dict) or len(autofilled) > 40:
+        raise ValueError("Herkunftsangaben ungültig")
+    heat_source.pop("switch_confirmed", None)
+    heat_source.update(profile=key, source=source, emsesp_host=host, circuit_id=circuit_id, autofilled=autofilled)
     return heat_source
 
 
@@ -269,10 +276,15 @@ def detect(ha_states):
 
 
 # --------------------------------------------------------------------- AB-029 automatic take-over
-# Configuration fields that can be filled from a read device profile. Only empty fields are filled;
-# a value the app filled itself is refreshed when the device changes, a value the user set is never
-# overwritten. Nothing is written to the device (read-only).
-AUTOFILL_ENTITIES = (            # (path, profile field) - only for source "ha": these are HA entity ids
+# Configuration fields that can be filled from a read device profile (review 12).
+# * Only empty fields are filled. Every automatic value gets a provenance record in
+#   heat_source.autofilled[path] = {value, profile, source, circuit_id, read_at, changed_at}.
+# * An automatic value follows the device while it is unchanged by the user and the profile, source and
+#   circuit are the same. A value changed by the user is never overwritten.
+# * Circuit fields go only to the circuit the profile is bound to (heat_source.circuit_id, or the only one).
+# * The controller's minimum outdoor temperature is a curve parameter, never the design outdoor temperature.
+# Nothing is written to the device (read-only).
+AUTOFILL_ENTITIES = (            # (path, profile field) - HA entity ids, only for source "ha"
     ("building.entities.outdoor", "outdoor"),
     ("building.entities.dhw", "dhw_charging"),
     ("circuit.entities.flow", "flow"),
@@ -284,6 +296,8 @@ HEATING_TYPE_MAP = {"radiator": "radiators", "floor": "underfloor", "floorheatin
 CURVE_PARAMS = ("curve_design", "curve_base", "curve_offset", "curve_max", "min_ext", "room_set",
                 "hp_min_flow", "control_mode", "room_influence", "solar_influence")
 PROFILE_MANUFACTURER = {"buderus-emsesp-hmc310": "Buderus"}
+PARAMS_PATH = "circuit.heating_curve.manufacturer_params"
+REFERENCE_PATH = "circuit.heating_curve.reference"
 AUTOFILL_LABELS = {
     "building.entities.outdoor": "Außentemperatur (Entität)",
     "building.entities.dhw": "Warmwasserbereitung (Entität)",
@@ -292,25 +306,24 @@ AUTOFILL_LABELS = {
     "circuit.entities.return": "Heizkreis Rücklauf (Entität)",
     "circuit.entities.pump": "Heizkreispumpe (Entität)",
     "building.heat_pump.manufacturer": "Hersteller Wärmepumpe",
-    "building.heating_system": "Heizsystem",
+    "building.heating_system": "Heizsystem Gebäude",
     "circuit.emitter_type": "Heizflächenart Heizkreis",
-    "circuit.heating_curve.manufacturer_params": "Heizkurve laut Regler",
-    "circuit.heating_curve.reference": "Quelle Heizkurve",
-    "building.design_outdoor_c": "Minimale Außentemperatur laut Regler",
-    "building.design_outdoor_reference": "Quelle minimale Außentemperatur",
+    PARAMS_PATH: "Heizkurve laut Regler",
+    REFERENCE_PATH: "Quelle Heizkurve",
 }
-
-
-def _target(cfg, path):
-    head, *rest = path.split(".")
-    node = cfg["building"] if head == "building" else (cfg["circuits"][0] if cfg.get("circuits") else None)
-    for key in rest[:-1]:
-        node = node.get(key) if isinstance(node, dict) else None
-    return node, rest[-1]
-
-
-def _empty(value):
-    return value in (None, "") or value == {}
+AUTOFILL_STATUS_TEXT = {
+    "auto": "Automatisch aus der Anlage übernommen",
+    "manual": "Manuell hinterlegter Wert bleibt bestehen",
+    "unclear": "Herkunft ungeklärt / Abgleich erforderlich",
+    "stale_source": "Aus alter Quelle, Prüfung erforderlich",
+    "unsupported": "Vom Profil nicht unterstützt",
+    "unavailable": "Derzeit nicht erreichbar / kein gültiger Messwert",
+    "rest_no_entity": "Nicht automatisch übernommen (REST ohne HA-Entität)",
+    "no_circuit": "Nicht automatisch übernommen: Heizkreis für das Profil wählen",
+    "multi_circuit": "Nicht automatisch übernommen: mehrere Heizkreise",
+    "unmapped": "Nicht automatisch übernommen: Reglerwert nicht eindeutig",
+    "empty": "Leer",
+}
 
 
 def _param(value):
@@ -322,61 +335,172 @@ def _param(value):
     return int(number) if number.is_integer() else number
 
 
-def autofill(cfg, values, today):
-    """AB-029: fill empty configuration fields from read profile values.
+def _empty(value):
+    return value in (None, "") or value == {}
 
-    ``values`` maps profile field key -> {"entity_id", "value"} for currently valid readings. Returns
-    ``(cfg, report)`` with report lists ``filled``, ``refreshed``, ``kept`` (user value, not overwritten)
-    and ``missing`` (no valid reading). ``cfg`` is changed in place.
-    """
+
+def bound_circuit(cfg):
+    """The circuit a single-circuit profile (e.g. HMC310 HK1) belongs to, or None if not unambiguous."""
+    circuits = cfg.get("circuits") or []
+    wanted = (cfg["building"].get("heat_source") or {}).get("circuit_id") or ""
+    if wanted:
+        return next((c for c in circuits if c.get("id") == wanted), None)
+    return circuits[0] if len(circuits) == 1 else None
+
+
+def _node(cfg, path, circuit):
+    head, *rest = path.split(".")
+    node = cfg["building"] if head == "building" else circuit
+    for key in rest[:-1]:
+        node = node.get(key) if isinstance(node, dict) else None
+    return node, rest[-1]
+
+
+def _proposals(cfg, values):
+    """{path: (value or None, reason)} for the configured profile and the currently valid readings."""
     source = cfg["building"].get("heat_source") or {}
     prof = profile(source.get("profile"))
-    report = {"filled": [], "refreshed": [], "kept": [], "missing": []}
-    if not prof or not cfg.get("circuits"):
-        return cfg, report
-    done = source.setdefault("autofilled", {})
-    proposals = {}
-    if source.get("source", "ha") == "ha":
-        for path, key in AUTOFILL_ENTITIES:
-            proposals[path] = values[key]["entity_id"] if key in values else None
-    if prof["key"] in PROFILE_MANUFACTURER:
-        proposals["building.heat_pump.manufacturer"] = PROFILE_MANUFACTURER[prof["key"]]
-    kind = HEATING_TYPE_MAP.get(str((values.get("heating_type") or {}).get("value", "")).strip().lower())
-    proposals["building.heating_system"] = kind
-    proposals["circuit.emitter_type"] = kind
+    keys = {f["key"] for f in prof["fields"]}
     labels = {f["key"]: f["label"] for f in prof["fields"]}
+    circuit = bound_circuit(cfg)
+
+    def reading(key, convert=lambda v: v):
+        if key not in keys:
+            return None, "unsupported"
+        if key not in values:
+            return None, "unavailable"
+        return convert(values[key]), "ok"
+
+    out = {}
+    for path, key in AUTOFILL_ENTITIES:
+        if source.get("source", "ha") != "ha":
+            out[path] = (None, "rest_no_entity")
+        else:
+            out[path] = reading(key, lambda v: v["entity_id"])
+    out["building.heat_pump.manufacturer"] = ((PROFILE_MANUFACTURER[prof["key"]], "ok") if prof["key"] in PROFILE_MANUFACTURER
+                                              else (None, "unsupported"))
+    kind, why = reading("heating_type", lambda v: HEATING_TYPE_MAP.get(str(v["value"]).strip().lower()))
+    if why == "ok" and kind is None:
+        why = "unmapped"
+    out["circuit.emitter_type"] = (kind, why)
+    out["building.heating_system"] = (kind, why) if len(cfg.get("circuits") or []) == 1 else (None, "multi_circuit")
     params = {labels[k]: _param(values[k]["value"]) for k in CURVE_PARAMS if k in values}
-    stamp = f"{prof['label']}, automatisch ausgelesen am {today}"
-    proposals["circuit.heating_curve.manufacturer_params"] = params or None
-    proposals["circuit.heating_curve.reference"] = stamp if params else None
-    try:
-        min_ext = float(values["min_ext"]["value"]) if "min_ext" in values else None
-    except (TypeError, ValueError):
-        min_ext = None
-    proposals["building.design_outdoor_c"] = min_ext
-    proposals["building.design_outdoor_reference"] = (
-        f"Regler: minimale Außentemperatur (Heizkurven-Auslegungspunkt), automatisch ausgelesen am {today}. "
-        "Mit der Heizlastberechnung abgleichen.") if min_ext is not None else None
-    for path, new in proposals.items():
-        node, key = _target(cfg, path)
+    out[PARAMS_PATH] = (params or None, "ok" if params else "unavailable")
+    if circuit is None:
+        for path in list(out):
+            if path.startswith("circuit."):
+                out[path] = (None, "no_circuit")
+        out["building.heating_system"] = (None, "no_circuit") if len(cfg.get("circuits") or []) == 1 else out["building.heating_system"]
+    return out, circuit
+
+
+def _current_record(rec, source, circuit, path):
+    return (isinstance(rec, dict) and rec.get("profile") == source.get("profile")
+            and rec.get("source") == source.get("source", "ha")
+            and (not path.startswith("circuit.") or rec.get("circuit_id") == (circuit or {}).get("id")))
+
+
+def autofill(cfg, values, now_iso, today):
+    """AB-029: fill/refresh configuration fields from valid profile readings. Changes ``cfg`` in place.
+
+    ``values`` maps profile field key -> {"entity_id", "value"} for currently valid readings.
+    Returns the list of labels that were filled or refreshed in this run.
+    """
+    source = cfg["building"].get("heat_source") or {}
+    if not profile(source.get("profile")):
+        return []
+    done = source.setdefault("autofilled", {})
+    proposals, circuit = _proposals(cfg, values)
+    changed = []
+
+    def record(path, value, first=None):
+        done[path] = {"value": value, "profile": source["profile"], "source": source.get("source", "ha"),
+                      "circuit_id": (circuit or {}).get("id") if path.startswith("circuit.") else None,
+                      "read_at": first or now_iso, "changed_at": now_iso}
+
+    for path, (new, _) in proposals.items():
+        if new is None:
+            continue
+        node, key = _node(cfg, path, circuit)
         if node is None:
             continue
-        label = AUTOFILL_LABELS[path]
-        current = node.get(key)
-        if new is None:
-            if _empty(current):
-                report["missing"].append(label)
-            continue
+        current, rec = node.get(key), done.get(path)
         if _empty(current):
             node[key] = new
-            done[path] = new
-            report["filled"].append(label)
-        elif path in done and done[path] == current:
-            if path.endswith(".reference") or current == new:   # date-only change is no refresh
-                continue
-            node[key] = new
-            done[path] = new
-            report["refreshed"].append(label)
-        elif current != new:
-            report["kept"].append(label)
-    return cfg, report
+            record(path, new)
+            changed.append(path)
+        elif _current_record(rec, source, circuit, path) and rec["value"] == current:
+            if current != new:
+                node[key] = new
+                record(path, new, rec.get("read_at"))
+                changed.append(path)
+        elif rec is None and current == new:
+            record(path, new)        # same value as the device: take over provenance, nothing changes
+    # The source/date of the curve parameters follows their last real change (review 12).
+    if circuit is not None and PARAMS_PATH in changed:
+        node, key = _node(cfg, REFERENCE_PATH, circuit)
+        rec = done.get(REFERENCE_PATH)
+        if _empty(node.get(key)) or (_current_record(rec, source, circuit, REFERENCE_PATH) and rec["value"] == node.get(key)):
+            text = f"{profile(source['profile'])['label']}, automatisch ausgelesen am {today}"
+            node[key] = text
+            record(REFERENCE_PATH, text, (rec or {}).get("read_at"))
+            changed.append(REFERENCE_PATH)
+    return [AUTOFILL_LABELS[p] for p in changed]
+
+
+def autofill_status(cfg, values):
+    """Persistent field status derived from the configuration and the current readings (review 12)."""
+    source = cfg["building"].get("heat_source") or {}
+    if not profile(source.get("profile")):
+        return []
+    done = source.get("autofilled") or {}
+    proposals, circuit = _proposals(cfg, values)
+    proposals[REFERENCE_PATH] = (None, proposals[PARAMS_PATH][1])
+    rows = []
+    for path, (new, reason) in proposals.items():
+        node, key = _node(cfg, path, circuit) if (circuit is not None or not path.startswith("circuit.")) else (None, None)
+        current = node.get(key) if node is not None else None
+        rec = done.get(path)
+        if not _empty(current) and isinstance(rec, dict):
+            if not _current_record(rec, source, circuit, path):
+                status = "stale_source" if rec.get("value") == current else "manual"
+            else:
+                status = "auto" if rec.get("value") == current else "manual"
+        elif not _empty(current):
+            status = "auto" if new is not None and new == current else "unclear"
+        else:
+            status = reason if reason != "ok" else "empty"
+        rows.append({"path": path, "label": AUTOFILL_LABELS[path], "status": status, "text": AUTOFILL_STATUS_TEXT[status],
+                     "value": current, "read_at": (rec or {}).get("read_at") if status in ("auto", "stale_source") else None,
+                     "changed_at": (rec or {}).get("changed_at") if status in ("auto", "stale_source") else None,
+                     "source": (rec or {}).get("source") if status in ("auto", "stale_source") else None})
+    return rows
+
+
+def auto_values_to_clear(previous, cfg):
+    """Paths whose value is still the automatic value of a *different* profile/source/circuit (review 12, P0)."""
+    old = (previous["building"].get("heat_source") or {})
+    new = (cfg["building"].get("heat_source") or {})
+    if (old.get("profile") or "", old.get("source") or "ha", (bound_circuit(previous) or {}).get("id")) == \
+       (new.get("profile") or "", new.get("source") or "ha", (bound_circuit(cfg) or {}).get("id")):
+        return []
+    done = new.get("autofilled") or old.get("autofilled") or {}
+    out = []
+    for path, rec in done.items():
+        if not isinstance(rec, dict) or path not in AUTOFILL_LABELS:
+            continue
+        circuit = next((c for c in cfg.get("circuits") or [] if c.get("id") == rec.get("circuit_id")), None)
+        node, key = _node(cfg, path, circuit) if (circuit is not None or not path.startswith("circuit.")) else (None, None)
+        if node is not None and rec.get("value") == node.get(key) and not _empty(node.get(key)):
+            out.append((path, circuit))
+    return out
+
+
+def clear_auto_values(cfg, paths):
+    """Remove automatic values of an old source; user values are not in ``paths`` and stay untouched."""
+    for path, circuit in paths:
+        node, key = _node(cfg, path, circuit)
+        current = node.get(key)
+        node[key] = {} if path == PARAMS_PATH else None if key in ("heating_system", "emitter_type") else ""
+    cfg["building"]["heat_source"]["autofilled"] = {}
+    return cfg

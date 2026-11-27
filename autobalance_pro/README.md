@@ -21,14 +21,25 @@
 
 ## Anlagendaten automatisch übernehmen (AB-029, in Entwicklung)
 
-Ist in Schritt 3 ein Geräteprofil gewählt (z. B. Buderus · BBQKees/EMS-ESP), füllt die App alle **leeren**
-Felder, die das Profil liefert: Entitäten für Außentemperatur, Warmwasser, Vorlauf, Vorlauf-Soll, Rücklauf und
-Heizkreispumpe (nur Quelle Home Assistant), Hersteller, Heizsystem/Heizflächenart (nur eindeutige Reglerwerte),
-Heizkurvenparameter laut Regler mit Quelle und Datum sowie die minimale Außentemperatur des Reglers (mit Hinweis,
-sie mit der Heizlastberechnung abzugleichen). Sofort nach dem Speichern und danach bei jeder Messung (5 min).
-Von der App gefüllte Werte werden bei Änderungen am Regler aktualisiert; **eigene Eingaben werden nie
-überschrieben**. Keine Heizkurvenpunkte, keine Auslegungsvorlauftemperatur, kein Verdichterstatus (nicht eindeutig).
-Rein lesend: nichts wird an die Anlage gesendet.
+Ist in Schritt 3 ein Geräteprofil gewählt (z. B. Buderus · BBQKees/EMS-ESP · HMC310 · Heizkreis 1), füllt die App
+alle **leeren** Felder, die das Profil liefert:
+- Entitäten Außentemperatur, Warmwasser, Vorlauf, Vorlauf-Soll, Rücklauf, Heizkreispumpe (nur Quelle Home Assistant)
+- Hersteller; Heizflächenart des zugeordneten Heizkreises (nur eindeutige Reglerwerte `radiator`/`floor`);
+  Heizsystem des Gebäudes nur bei genau einem Heizkreis
+- Heizkurvenparameter laut Regler mit Quelle und Datum der letzten Änderung
+
+Regeln (Review ChatGPT 12):
+- Jeder automatische Wert hat eine gespeicherte Herkunft (Profil, Quelle, Heizkreis, erstmals gelesen, zuletzt
+  geändert). Er folgt dem Regler, solange er unverändert ist; **manuell hinterlegte Werte werden nie überschrieben**.
+- Kreiswerte nur in den Heizkreis, dem das Profil zugeordnet ist („Profil gilt für Heizkreis“; bei einem Kreis
+  automatisch). Ohne eindeutige Zuordnung werden keine Kreiswerte übernommen.
+- Wechsel von Profil, Datenquelle oder Heizkreis nur mit Bestätigung; dabei werden die automatischen Werte der
+  bisherigen Quelle entfernt und neu übernommen, manuelle bleiben.
+- Die **minimale Außentemperatur des Reglers wird nicht als Norm-Außentemperatur übernommen**; sie steht als
+  Reglerwert neben dem Feld („Norm-Außentemperatur laut Heizlast: noch nicht bestätigt“).
+- Nicht automatisch: Heizkurven-Stützpunkte, Auslegungsvorlauf/-rücklauf, Verdichterstatus, Modell, Nennleistung,
+  Mindestvolumenstrom. Erfassungsstatus wird nur zurückgesetzt, wenn sich gemessene Entitäten ändern.
+- Rein lesend: nichts wird an die Anlage gesendet.
 
 ## Messdaten, Aufbewahrung und Löschung (AB-025, AB-026)
 

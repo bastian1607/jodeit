@@ -766,9 +766,11 @@ class MobileTests(V2Browser):
         expect(self.page.locator("#hs-detect-box")).to_have_count(0)        # configured -> no proposal
         # AB-029: everything the profile delivers is taken over automatically into empty fields
         auto = self.page.locator("#hs-autofill-box")
-        expect(auto).to_contain_text("Automatisch aus der Anlage übernommen")
-        expect(auto).to_contain_text("Heizkreis Vorlauf (Entität)")
+        expect(auto.locator(".autofill-auto")).to_contain_text("Automatisch aus der Anlage übernommen")
+        expect(auto.locator(".autofill-auto")).to_contain_text("Heizkreis Vorlauf (Entität)")
         expect(auto).to_contain_text("Es wird nichts an die Anlage gesendet")
+        expect(self.page.locator("#b-outdoor-controller")).to_contain_text("Norm-Außentemperatur laut Heizlast: noch nicht bestätigt")
+        expect(self.page.locator("#b-outdoor")).to_have_value("")                     # AC29-01
         cfg = self.v2()
         self.assertEqual(cfg["circuits"][0]["entities"]["flow"], "sensor.boiler_curflowtemp")
         self.assertEqual(cfg["building"]["heat_pump"]["manufacturer"], "Buderus")
@@ -780,8 +782,22 @@ class MobileTests(V2Browser):
         self.page.reload()
         self.tab("3 Heizungsanlage & Heizkreise")
         expect(auto).to_be_visible()
-        expect(auto).not_to_contain_text("Eigene Angaben beibehalten")
+        expect(auto).not_to_contain_text("Manuell hinterlegter Wert")
+        expect(auto).not_to_contain_text("Herkunft ungeklärt")
         self.assertIn("circuit.entities.flow", self.v2()["building"]["heat_source"]["autofilled"])
+        # Review 12, AC29-05/10: a source switch needs consent and removes the automatic values of the old source
+        self.page.select_option("#hs-source", "emsesp_rest")
+        self.page.fill("#hs-host", "192.168.178.69")
+        expect(self.page.locator("#hs-switch-box")).to_contain_text("Manuell hinterlegte Werte bleiben bestehen")
+        self.page.locator("#plant-form").evaluate("f => f.requestSubmit()")
+        expect(self.page.locator("#notice")).to_contain_text("bestätigen")
+        self.assertEqual(self.v2()["building"]["heat_source"]["source"], "ha")
+        self.page.check("#hs-switch-confirm")
+        self.page.locator("#plant-form").evaluate("f => f.requestSubmit()")
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        cfg = self.v2()
+        self.assertEqual(cfg["building"]["heat_source"]["source"], "emsesp_rest")
+        self.assertEqual(cfg["circuits"][0]["entities"]["flow"], "")
 
     def test_ab022_partial_match_is_hint_only(self):
         self.seed(rooms=("Wohnzimmer",))
