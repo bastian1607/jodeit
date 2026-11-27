@@ -223,11 +223,33 @@ class AssessmentTests(unittest.TestCase):
         roles = dict(ROLES, heating_active=None, hp_activity=None)
         r = Plant().run(roles=roles)
         self.assertEqual(r["stage"], "unverified")
-        self.assertIn("kein Betriebsstatus der Wärmepumpe", " ".join(assessment.report_text(r)))
+        self.assertIn("Heizbetrieb nur in 0 durch gültige Statuswerte", " ".join(assessment.report_text(r)))
+        self.assertIn("Kein Betriebsstatus der Wärmepumpe zugeordnet", " ".join(r["reasons"]))
         roles = dict(ROLES, hp_activity=None, dhw=None)       # heating known, disturbances not checked
         r = Plant(outdoor=lambda t: 2.0).run(roles=roles)
         self.assertEqual(r["stage"], "level")
-        self.assertIn("Störungsfreiheit (Warmwasser/Abtauung) nicht belegt", r["stage_text"])
+        self.assertEqual(r["stage_text"], assessment.STAGE_TEXT["level"])      # notice is separate, not appended
+        self.assertEqual(r["disturbance_notice"], "WW-/Abtauphasen nicht zuverlässig erfasst. Messergebnis fachlich eingeschränkt.")
+
+    def test_review7_e_status_assigned_but_unavailable_all_nights(self):
+        p = Plant()
+        p.set("binary_sensor.heat", p.start, p.end, s="unavailable", ok=False)
+        p.set("sensor.act", p.start, p.end, s="unavailable", ok=False)
+        r = p.run()
+        self.assertEqual(r["stage"], "unverified")
+        self.assertGreaterEqual(r["technical_nights"], 6)
+        self.assertEqual(r["valid_nights"], 0)
+        self.assertIn("Nur 0 von", " ".join(r["reasons"]))
+
+    def test_heating_status_missing_in_part_of_the_nights(self):
+        p = Plant(outdoor=by_night({1: 4, 2: 4, 3: -6, 4: -5, 5: 4, 6: 4, 7: 4}))
+        p.set("binary_sensor.heat", local(3, 12), local(5, 12), s="unknown", ok=False)
+        p.set("sensor.act", local(3, 12), local(5, 12), s="unknown", ok=False)
+        r = p.run()
+        self.assertEqual(r["technical_nights"], 7)
+        self.assertEqual(r["valid_nights"], 5)           # nights 3 and 4 not counted
+        self.assertFalse(next(n for n in r["nights"] if n["date"] == "2026-12-03")["heating_verified"])
+        self.assertEqual(r["stage"], "level")            # cold nights unverified -> must not create a slope
 
     def test_ac6_03_slope_examples(self):
         ok = Plant(outdoor=by_night({1: -6, 2: -5, 3: 3, 4: 4, 5: 4, 6: 4, 7: 4})).run()
@@ -272,10 +294,11 @@ class ServerTests(unittest.TestCase):
             r = server.session_assessment(s["id"], now=p.end)
         self.assertEqual(r["roles"]["outdoor"], "sensor.out")
         self.assertIsNone(r["roles"]["outdoor_damped"])
-        self.assertEqual(r["valid_nights"], 4)
+        self.assertEqual(r["technical_nights"], 4)
+        self.assertEqual(r["valid_nights"], 0)
         # AC6-02: HA assignment without heating-mode signal -> descriptive only, no level statement
         self.assertEqual(r["stage"], "unverified")
-        self.assertIn("Heizbetrieb nicht bestätigt", r["stage_text"])
+        self.assertIn("Heizbetrieb nicht nachgewiesen", r["stage_text"])
         self.assertTrue(r["read_only"])
         self.assertIsNone(server.session_assessment("ma_unknown"))
 
