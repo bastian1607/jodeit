@@ -128,23 +128,28 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(row['valid'])
         self.assertFalse(row['stale'])
         self.assertTrue(row['unchanged_long'])                                         # neutral hint only
+        self.assertFalse(row['unchanged_check'])                                       # 20 h < 24 h
         row=next(r for r in server.latest_observations(self.now+timedelta(minutes=31)) if r['entity_id']=='sensor.room')   # own acquisition stopped
         self.assertTrue(row['stale'])
         self.assertFalse(row['valid'])
         self.assertEqual(server.quality(dict(unchanged,state='unavailable'),True,self.now)[0],'unavailable')
-    def test_ab027_old_stale_samples_reclassified_once_with_backup(self):
+    def test_ab027_historical_stale_samples_stay_excluded(self):
         with server.connect() as c:
             c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit) VALUES(?,?,?,?,?,?,?,?,?)",
-                      (self.now.isoformat(),'sensor.t','20.5','°C',0,(self.now-timedelta(hours=2)).isoformat(),'stale',20.5,'°C'))
-            c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality) VALUES(?,?,?,?,?,?)",(self.now.isoformat(),'sensor.t','unavailable','°C',0,'unavailable'))
-            c.execute("DELETE FROM schema_migrations WHERE kind='ab027_unchanged_valid'")
-        self.assertEqual(server.reclassify_unchanged_samples(),1)
+                      ((self.now-timedelta(days=1)).isoformat(),'sensor.room','20.5','°C',0,(self.now-timedelta(days=1,hours=2)).isoformat(),'stale',20.5,'°C'))
+        server.setup()                                                                   # no silent re-qualification on start
         with server.connect() as c:
-            rows=c.execute("SELECT quality,valid FROM samples WHERE entity_id='sensor.t' ORDER BY id").fetchall()
-            backup=c.execute("SELECT backup_path FROM schema_migrations WHERE kind='ab027_unchanged_valid'").fetchone()[0]
-        self.assertEqual(rows,[('ok',1),('unavailable',0)])
-        self.assertTrue(Path(backup).exists())
-        self.assertEqual(server.reclassify_unchanged_samples(),0)                         # once only
+            self.assertEqual(c.execute("SELECT quality,valid FROM samples WHERE quality='stale'").fetchall(),[('stale',0)])
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM schema_migrations WHERE kind LIKE 'ab027%'").fetchone()[0],0)
+    def test_ab027_repeated_polls_of_unchanged_value(self):
+        since=(self.now-timedelta(hours=30)).isoformat()
+        for k in range(3):                                                               # HA keeps delivering 20 °C, unchanged
+            with patch.object(server,'utcnow',return_value=self.now+timedelta(minutes=5*k)),patch.object(server,'get_entities',return_value=[self.entity(state='20',unit='°C',source_at=since)]):
+                server.sample()
+        with server.connect() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM samples WHERE entity_id='sensor.room' AND quality='ok' AND valid=1").fetchone()[0],3)
+        row=next(r for r in server.latest_observations(self.now+timedelta(minutes=10)) if r['entity_id']=='sensor.room')
+        self.assertTrue(row['valid'] and row['unchanged_long'] and row['unchanged_check'])
     def test_ab011_event_based_entities_are_not_aged_out(self):
         old=(self.now-timedelta(hours=7)).isoformat()
         contact=self.entity(entity_id='binary_sensor.window',state='off',unit='',source_at=old)

@@ -269,7 +269,7 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(c.execute("SELECT COUNT(*) FROM samples").fetchone()[0], 50)
         with server.connect() as c:
             self.assertEqual(c.execute("SELECT COUNT(*) FROM samples").fetchone()[0], 50)  # samples untouched
-            migration = c.execute("SELECT version,kind,backup_path FROM schema_migrations WHERE kind NOT LIKE 'ab027%'").fetchall()
+            migration = c.execute("SELECT version,kind,backup_path FROM schema_migrations").fetchall()
         self.assertEqual(migration, [(2, "v1_to_v2", str(backups[0]))])
         emitter_ids = [e["id"] for e in cfg["emitters"]]
         server.setup()
@@ -277,7 +277,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual([e["id"] for e in server.load_v2()["emitters"]], emitter_ids)
         self.assertEqual(len(self.backups()), 1)
         with server.connect() as c:
-            self.assertEqual(c.execute("SELECT COUNT(*) FROM schema_migrations WHERE kind NOT LIKE 'ab027%'").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 1)
 
     def test_legacy_row_is_readable_for_downgrade_and_merged_back(self):
         self.v012_database(v1_config())
