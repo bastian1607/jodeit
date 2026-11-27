@@ -46,6 +46,7 @@ details.card>.body{padding:0 12px 12px}
 .status.warn{background:#fff2da;color:#6b4a00}
 .status.bad{background:#fde4e4;color:#941f1f}
 .status.good{background:#e1f4e9;color:#15583b}
+label.check{font-weight:400;display:flex;gap:8px;align-items:flex-start}label.check input{width:auto;margin-top:3px}.warn-text{color:#8a5a00}
 .warn-box{background:#fff2da;border-radius:8px;padding:10px;margin:8px 0;font-size:13px}
 .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.kv .item{margin:0;padding:9px 11px}
 .info-box{background:#eef2f4;border-radius:8px;padding:10px;margin:8px 0;font-size:13px}
@@ -889,8 +890,14 @@ function jobLinks(s){
   box.append(rep,document.createTextNode(' · '),csv,document.createTextNode(' '),show);return box;
 }
 async function stopMeasurement(a){
-  if(!confirm('Messung „'+a.name+'“ stoppen? Der Bericht bleibt gespeichert und kann später gedruckt werden.'))return false;
-  try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messung gestoppt. Bericht unter „Frühere Messungen“.');return true}catch(ex){notice(ex.message,true);return false}
+  if(!confirm('Messung „'+a.name+'“ stoppen?\n\nAbschlussbericht für diesen Messauftrag wird auf dem Messgerät festgeschrieben. Die gesonderte Ablage in der Kundenakte muss bestätigt werden.'))return false;
+  try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messung gestoppt. Bericht festgeschrieben, unter „Frühere Messungen“ abrufbar.');return true}catch(ex){notice(ex.message,true);return false}
+}
+function sensorFreshness(s){
+  if(!s||s.quality==='no_data')return 'noch kein Messwert';
+  if(!s.valid)return 'nicht verfügbar oder ungültig';
+  const a=s.age_seconds;const age=a===null||a===undefined?'Alter unbekannt':a<120?'gerade eben':a<3600?'vor '+Math.round(a/60)+' min':'vor '+num1(a/3600)+' h';
+  return num1(s.value)+' °C · '+age+(s.stale?' (veraltet)':'');
 }
 let sessionsRender=0;
 async function renderSessions(){
@@ -916,7 +923,7 @@ async function renderSessions(){
     const form=document.createElement('div');form.className='item';form.id='session-form';
     const monitored=cfg.rooms.filter(r=>r.temperature_sensors.length),others=cfg.rooms.filter(r=>!r.temperature_sensors.length);
     const nl=document.createElement('label');nl.htmlFor='session-name';nl.textContent='Bezeichnung (Freitext, z. B. Name, Auftrag oder Angebot)';
-    const name=document.createElement('input');name.id='session-name';name.maxLength=120;name.placeholder='z. B. Müller · Angebot 2026-123';name.autocomplete='off';
+    const name=document.createElement('input');name.id='session-name';name.maxLength=120;name.placeholder='z. B. J-2026-123 (Kundenname optional)';name.autocomplete='off';
     const tl=document.createElement('label');tl.htmlFor='session-note';tl.textContent='Notiz, optional';
     const note=document.createElement('textarea');note.id='session-note';note.maxLength=1000;note.rows=2;
     const dl=document.createElement('label');dl.htmlFor='session-days';dl.textContent='Geplante Dauer in Tagen';
@@ -924,16 +931,27 @@ async function renderSessions(){
     const sel=document.createElement('p');sel.className='hint';sel.textContent='Gemessen werden '+monitored.length+' von '+cfg.rooms.length+' Räumen'+(others.length?'; nicht überwacht: '+others.map(r=>r.name).join(', '):'')+'. '+(roomsData?.help||'');
     const hintList=document.createElement('ul');
     for(const r of cfg.rooms){const h=roomsData?.hints?.[r.id]||[];if(!h.length)continue;const li=document.createElement('li');li.textContent=r.name+': '+h.join(' · ');hintList.append(li)}
+    // AC6-05: the installer reviews sensor IDs and freshness before the job starts.
+    const review=document.createElement('div');review.id='session-sensor-review';
+    const rh=document.createElement('p');rh.textContent='Zugeordnete Temperaturfühler (Aktualität des letzten Werts):';review.append(rh);
+    const rl=document.createElement('ul');
+    for(const r of monitored){const live=roomsData?.rooms?.find(x=>x.id===r.id);
+      for(const e of r.temperature_sensors){const s=live?.sensors?.find(x=>x.entity_id===e);const li=document.createElement('li');
+        li.append(document.createTextNode(r.name+': '),Object.assign(document.createElement('code'),{textContent:e}),document.createTextNode(' · '+sensorFreshness(s)));
+        if(!s||!s.valid)li.className='warn-text';rl.append(li)}}
+    review.append(rl);
+    const nm=document.createElement('p');nm.className='hint';nm.textContent='Nicht überwacht: '+(others.map(r=>r.name).join(', ')||'–');review.append(nm);
+    const ckl=document.createElement('label');ckl.className='check';const ck=document.createElement('input');ck.type='checkbox';ck.id='session-confirm';
+    ckl.append(ck,document.createTextNode(' Ich habe Sensorzuordnung, Aufstellorte und nicht überwachte Räume geprüft'));review.append(ckl);
     const start=document.createElement('button');start.className='primary';start.id='session-start';start.textContent='Messung beginnen';
-    start.disabled=!monitored.length;
+    start.disabled=true;ck.addEventListener('change',()=>{start.disabled=!monitored.length||!ck.checked});
     start.addEventListener('click',async()=>{
       const n=name.value.trim(),d=Number(days.value);
       if(!n){notice('Bitte eine Bezeichnung eingeben (z. B. Name oder Auftrag).',true);name.focus();return}
-      // The click on this dialog is the installer's confirmation of the measuring rooms (AC-013-14).
-      if(!confirm('Messung „'+n+'“ beginnen?\n\nGemessen: '+(monitored.map(r=>r.name).join(', ')||'–')+'\nNicht überwacht: '+(others.map(r=>r.name).join(', ')||'–')))return;
+      if(!ck.checked){notice('Bitte die Prüfung der Sensorzuordnung bestätigen.',true);return}
       try{await api('v2/sessions/start','POST',{name:n,note:note.value.trim(),planned_days:Number.isInteger(d)?d:NaN,confirmed:true});notice('Messung „'+n+'“ läuft.');renderSessions();stats()}
       catch(ex){notice('Messung nicht begonnen: '+ex.message,true)}});
-    form.append(nl,name,tl,note,dl,days,sel);if(hintList.children.length)form.append(hintList);form.append(start);
+    form.append(nl,name,tl,note,dl,days,sel);if(hintList.children.length)form.append(hintList);form.append(review,start);
     if(!monitored.length){const w=document.createElement('p');w.className='warn-box';w.textContent='Für eine Messung mindestens einem Raum einen Temperaturfühler zuordnen.';form.append(w)}
     root.append(form);
   }
@@ -946,7 +964,7 @@ async function renderSessions(){
   if(!done.length){const p=document.createElement('p');p.className='hint';p.textContent='Noch keine abgeschlossene Messung.';list.append(p)}
   for(const s of done){const row=document.createElement('div');row.className='item';
     const b=document.createElement('b');b.textContent=s.name;
-    const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.note?' · '+s.note:'');
+    const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.finalized?' · Bericht festgeschrieben':'')+(s.note?' · '+s.note:'');
     row.append(b,p,jobLinks(s));list.append(row)}
   root.append(list);
 }
@@ -970,7 +988,7 @@ async function renderQuickMeasurement(){
   root.append(box);
 }
 /* ---------- AB-014 Aussagekraft des Messauftrags (nur lesend) ---------- */
-const STAGE_KIND={no_data:'warn',insufficient:'bad',level:'warn',level_and_slope:'good'};
+const STAGE_KIND={no_data:'warn',insufficient:'bad',unverified:'warn',level:'warn',level_and_slope:'good'};
 const DIST_TEXT={dhw:'Warmwasser',defrost:'Abtauung',heating_off:'kein Heizbetrieb',change:'Parameter-/Sollwertänderung',window:'Fenster offen'};
 function num1(v){return v===null||v===undefined?'–':Number(v).toLocaleString('de-DE',{maximumFractionDigits:1})}
 let assessmentRender=0;
@@ -982,9 +1000,11 @@ async function renderAssessment(id){
   root.replaceChildren();
   const h=document.createElement('h3');h.textContent='Heizkurvenbewertung fachlich möglich? · '+r.session.name;root.append(h);
   const head=document.createElement('div');head.className='item';head.id='assessment-stage';
-  head.append(badge(r.stage_text,STAGE_KIND[r.stage]));
+  head.append(badge(r.stage_text,r.restricted?'warn':STAGE_KIND[r.stage]));
+  if(r.restricted)head.append(document.createTextNode(' '),Object.assign(badge(r.restricted_label,'warn'),{id:'assessment-restricted'}));
+  if(r.disturbance_notice){const w=document.createElement('p');w.className='warn-box';w.id='assessment-disturbance';w.textContent=r.disturbance_notice;head.append(w)}
   const facts=document.createElement('p');
-  facts.textContent='Messdauer '+num1(r.window.hours)+' h von geplant '+r.window.planned_days+' Tagen · geeignete Nächte: '+r.valid_nights+' · verwertbare Stunden: '+num1(r.valid_hours)+
+  facts.textContent='Messdauer '+num1(r.window.hours)+' h von geplant '+r.window.planned_days+' Tagen · technisch auswertbare Nächte: '+(r.technical_nights??r.valid_nights)+' · davon Heizbetrieb bestätigt: '+r.valid_nights+' · verwertbare Stunden: '+num1(r.valid_hours)+
     ' · Außentemperatur '+(r.outdoor_band.damped?'(gedämpft) ':'(ungedämpft) ')+(r.outdoor_band.min===null?'–':num1(r.outdoor_band.min)+' bis '+num1(r.outdoor_band.max)+' °C, Spanne '+num1(r.outdoor_band.span_k)+' K')+'.';
   head.append(facts);
   for(const t of r.reasons){const p=document.createElement('p');p.className='hint';p.textContent=t;head.append(p)}
@@ -994,7 +1014,8 @@ async function renderAssessment(id){
   for(const n of r.nights){const row=document.createElement('div');row.className='item row';
     const l=document.createElement('span');l.textContent='Nacht '+new Date(n.date+'T12:00').toLocaleDateString('de-DE')+' · '+num1(n.ok_hours)+' h verwertbar · außen '+num1(n.outdoor_median)+' °C';
     const d=n.disturbances.map(x=>DIST_TEXT[x]||x);
-    row.append(l,badge(n.valid?'geeignet':'nicht geeignet'+(d.length?' · '+d.join(', '):''),n.valid?'good':'warn'));list.append(row)}
+    const st=!n.valid?['nicht auswertbar'+(d.length?' · '+d.join(', '):''),'warn']:(n.heating_verified??true)?['technisch auswertbar · Heizbetrieb bestätigt','good']:['technisch auswertbar · Heizbetrieb nicht nachgewiesen','warn'];
+    row.append(l,badge(st[0],st[1]));list.append(row)}
   root.append(list);
   const rooms=document.createElement('p');rooms.className='hint';
   rooms.textContent='Räume in geeigneten Nächten (Median Ist − Soll): '+r.rooms.map(x=>x.name+' '+(x.monitored?(x.deviation_median_k===null?'keine Daten':(x.deviation_median_k>0?'+':'')+num1(x.deviation_median_k)+' K'+(x.stationary===false?' (nicht stationär)':'')):'nicht überwacht')).join(' · ');

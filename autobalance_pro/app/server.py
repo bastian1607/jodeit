@@ -44,12 +44,21 @@ def setup():
         c.execute("CREATE TABLE IF NOT EXISTS config_history (id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL)")
         # AB-013/AB-020: a measuring job (Messauftrag) delimits the evaluated time window per site.
         c.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, name TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT, planned_days INTEGER NOT NULL, rooms TEXT NOT NULL, note TEXT)")
+        # AB-025: every sample taken during a measuring job carries its id; the job keeps its own
+        # configuration snapshots and, once stopped, an immutable report. Additive columns only.
+        columns={row[1] for row in c.execute("PRAGMA table_info(samples)")}
+        if "session_id" not in columns:c.execute("ALTER TABLE samples ADD COLUMN session_id TEXT")
+        c.execute("CREATE INDEX IF NOT EXISTS samples_session ON samples(session_id,at)")
+        columns={row[1] for row in c.execute("PRAGMA table_info(sessions)")}
+        for name in ("config_start","history","report_html","assessment","finalized_at","app_version"):
+            if name not in columns:c.execute(f"ALTER TABLE sessions ADD COLUMN {name} TEXT")
     sync_config()
     with LOCK, connect() as c:
         if not c.execute("SELECT 1 FROM config_history LIMIT 1").fetchone():
             # Baseline for installations before AB-013: valid since the first stored sample.
             first=c.execute("SELECT MIN(at) FROM samples").fetchone()[0]
             c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(first or utcnow().isoformat(),"baseline",json.dumps(load_v2(),ensure_ascii=False)))
+    migrate_sessions()
 
 def backup_database(reason):
     """Consistent copy via the SQLite backup API (safe with WAL), stored next to the DB."""
@@ -244,13 +253,16 @@ def sample():
             HEAT_SOURCE_STATUS.update(at=at,errors=errors)
             if errors:logging.warning("EMS-ESP-Abfrage unvollständig: %s",errors)
         temps=temperature_ids(d)
+        with connect() as c:
+            active=c.execute("SELECT id FROM sessions WHERE ended_at IS NULL LIMIT 1").fetchone()
+        job=active[0] if active else None   # AB-025: samples of a measuring job are tagged with its id
         vals=[]
         for entity in desired:
             e=state.get(entity,{})
             code,normalized,unit=quality(e,entity in temps,now)
-            vals.append((at,entity,e.get("state","unavailable"),e.get("unit",""),int(code=="ok"),e.get("source_at"),code,normalized,unit))
+            vals.append((at,entity,e.get("state","unavailable"),e.get("unit",""),int(code=="ok"),e.get("source_at"),code,normalized,unit,job))
         with connect() as c:
-            c.executemany("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit) VALUES (?,?,?,?,?,?,?,?,?)",vals)
+            c.executemany("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit,session_id) VALUES (?,?,?,?,?,?,?,?,?,?)",vals)
             c.execute("INSERT INTO acquisition(id,last_attempt,last_success,connected,error) VALUES(1,?,?,1,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,connected=1,error=NULL",(at,at))
 
 def latest_observations(now=None):
@@ -343,18 +355,51 @@ def target_changes(start=None,end=None):
     return changes
 
 SESSION_NAME=re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")  # AB-024: free text (name, order/offer …); output is always escaped
+SESSION_COLUMNS="id,name,started_at,ended_at,planned_days,rooms,note,finalized_at,app_version"
 def _session_row(r):
-    keys=("id","name","started_at","ended_at","planned_days","rooms","note")
-    d=dict(zip(keys,r));d["rooms"]=json.loads(d["rooms"]);return d
+    d=dict(zip(SESSION_COLUMNS.split(","),r));d["rooms"]=json.loads(d["rooms"]);d["finalized"]=bool(d["finalized_at"]);return d
 
 def list_sessions():
-    with connect() as c:rows=c.execute("SELECT id,name,started_at,ended_at,planned_days,rooms,note FROM sessions ORDER BY started_at DESC").fetchall()
+    with connect() as c:rows=c.execute(f"SELECT {SESSION_COLUMNS} FROM sessions ORDER BY started_at DESC").fetchall()
     sessions=[_session_row(r) for r in rows]
     return {"active":next((s for s in sessions if not s["ended_at"]),None),"sessions":sessions}
 
 def get_session(sid):
-    with connect() as c:r=c.execute("SELECT id,name,started_at,ended_at,planned_days,rooms,note FROM sessions WHERE id=?",(sid,)).fetchone()
+    with connect() as c:r=c.execute(f"SELECT {SESSION_COLUMNS} FROM sessions WHERE id=?",(sid,)).fetchone()
     return _session_row(r) if r else None
+
+def _session_blob(sid,column):
+    with connect() as c:r=c.execute(f"SELECT {column} FROM sessions WHERE id=?",(sid,)).fetchone()
+    return r[0] if r else None
+
+def session_history(sid,end=None):
+    """[(datetime, cfg)] of one job: its start snapshot plus every saved change during the job.
+
+    A stopped job uses its frozen history, so later configurations (e.g. the next customer)
+    can never leak into it (AB-025)."""
+    frozen=_session_blob(sid,"history")
+    if frozen:return [(coverage.parse(at),cfg) for at,cfg in json.loads(frozen)]
+    s=get_session(sid);start=s["started_at"]
+    snap=_session_blob(sid,"config_start")
+    first=json.loads(snap) if snap else (config_history(start)[:1] or [(start,load_v2())])[0][1]
+    later=[(at,cfg) for at,cfg in config_history(start,end) if at>start]
+    return [(coverage.parse(start),first)]+[(coverage.parse(at),cfg) for at,cfg in later]
+
+def migrate_sessions():
+    """AB-025 migration for jobs created by v0.4.0: tag their samples, store the start snapshot,
+    finalize stopped jobs. Jobs never overlap (only one can be active), so time windows are unique."""
+    with LOCK:
+        with connect() as c:
+            rows=c.execute("SELECT id,started_at,ended_at,config_start,finalized_at FROM sessions").fetchall()
+        for sid,start,end,snap,final in rows:
+            if snap is None:
+                cfg=(config_history(start)[:1] or [(start,load_v2())])[0][1]
+                with connect() as c:
+                    c.execute("UPDATE samples SET session_id=? WHERE session_id IS NULL AND at>=? AND (? IS NULL OR at<=?)",(sid,start,end,end))
+                    c.execute("UPDATE sessions SET config_start=? WHERE id=?",(json.dumps(cfg,ensure_ascii=False),sid))
+                logging.info("Messung %s auf Auftragstrennung umgestellt",sid)
+            if end and not final:
+                finalize_session(sid,coverage.parse(end))
 
 def start_session(data,now=None):
     """Start a measuring job. Local bookkeeping only – nothing is sent to HA or the heat pump."""
@@ -373,7 +418,8 @@ def start_session(data,now=None):
         if not any(r["sensors"] for r in rooms):raise ValueError("Mindestens ein Raum mit Temperaturfühler ist für einen Messauftrag nötig")
         if list_sessions()["active"]:raise ValueError("Es läuft bereits eine Messung – bitte zuerst stoppen")
         sid="ma_"+uuid.uuid4().hex[:12];at=(now or utcnow()).isoformat()
-        with connect() as c:c.execute("INSERT INTO sessions(id,name,started_at,planned_days,rooms,note) VALUES(?,?,?,?,?,?)",(sid,name.strip(),at,days,json.dumps(rooms,ensure_ascii=False),note.strip()))
+        with connect() as c:c.execute("INSERT INTO sessions(id,name,started_at,planned_days,rooms,note,config_start,app_version) VALUES(?,?,?,?,?,?,?,?)",
+            (sid,name.strip(),at,days,json.dumps(rooms,ensure_ascii=False),note.strip(),json.dumps(cfg,ensure_ascii=False),VERSION))
     log_event("session_start",sid)
     return get_session(sid)
 
@@ -382,9 +428,22 @@ def stop_session(sid,now=None):
         s=get_session(sid) if isinstance(sid,str) else None
         if not s:raise ValueError("Messauftrag nicht gefunden")
         if s["ended_at"]:raise ValueError("Messauftrag ist bereits beendet")
-        with connect() as c:c.execute("UPDATE sessions SET ended_at=? WHERE id=?",((now or utcnow()).isoformat(),sid))
+        end=now or utcnow()
+        with connect() as c:c.execute("UPDATE sessions SET ended_at=? WHERE id=?",(end.isoformat(),sid))
+        finalize_session(sid,end)
     log_event("session_stop",sid)
     return get_session(sid)
+
+def finalize_session(sid,end):
+    """Freeze history, assessment and report at the end of a job (AB-025, AC6-09). Never rewritten."""
+    with LOCK:
+        history=session_history(sid,end.isoformat())
+        with connect() as c:c.execute("UPDATE sessions SET history=? WHERE id=? AND history IS NULL",
+            (json.dumps([(t.isoformat(),cfg) for t,cfg in history],ensure_ascii=False),sid))
+        result=session_assessment(sid,end)
+        html=session_report(sid,end,frozen_at=end,result=result)
+        with connect() as c:c.execute("UPDATE sessions SET assessment=?,report_html=?,finalized_at=?,app_version=COALESCE(app_version,?) WHERE id=? AND finalized_at IS NULL",
+            (json.dumps(result,ensure_ascii=False),html,end.isoformat(),VERSION,sid))
 
 def plant_timezone():
     """Local time zone of the plant for the night definition (AB-014). HA passes TZ to apps."""
@@ -412,45 +471,55 @@ def session_assessment(sid,now=None):
     """AB-014: evaluate a measuring job from stored data only (read-only)."""
     s=get_session(sid)
     if not s:return None
+    frozen=_session_blob(sid,"assessment")
+    if frozen:return json.loads(frozen)
     now=now or utcnow()
     start=coverage.parse(s["started_at"]);end=coverage.parse(s["ended_at"]) if s["ended_at"] else now
-    history=[(coverage.parse(at),cfg) for at,cfg in config_history(s["started_at"],end.isoformat())]
-    cfg=history[-1][1] if history else load_v2()
+    history=session_history(sid,end.isoformat())
+    cfg=history[-1][1]
     roles=assessment_roles(cfg)
     ids=set(x for k,x in roles.items() if k!="params" and x)|set(roles["params"])
     for _,h in history:
         for r in h.get("rooms",[]):ids.update(r.get("temperature_sensors",[]));ids.update(r.get("window_sensors",[]))
     values={}
     with connect() as c:
-        tick_rows=[r[0] for r in c.execute("SELECT DISTINCT at FROM samples WHERE at>=? AND at<=? ORDER BY at",(s["started_at"],end.isoformat()))]
-        for at,eid,state,valid,q,nv in c.execute("SELECT at,entity_id,state,valid,quality,normalized_value FROM samples WHERE at>=? AND at<=?",(s["started_at"],end.isoformat())):
+        # AB-025: only samples recorded for this job – never global or other customers' data.
+        tick_rows=[r[0] for r in c.execute("SELECT DISTINCT at FROM samples WHERE session_id=? ORDER BY at",(sid,))]
+        for at,eid,state,valid,q,nv in c.execute("SELECT at,entity_id,state,valid,quality,normalized_value FROM samples WHERE session_id=?",(sid,)):
             if eid not in ids:continue
             t=coverage.parse(at)
             if t is None:continue
             values.setdefault(t,{})[eid]={"v":nv,"s":state,"ok":bool(valid) and (q in (None,"ok"))}
     ticks=sorted(t for t in (coverage.parse(x) for x in tick_rows) if t)
     tz,tz_name,tz_ok=plant_timezone()
-    result=assessment.assess(start,end,ticks,values,history or [(start,cfg)],roles,tz,s["planned_days"],now)
+    result=assessment.assess(start,end,ticks,values,history,roles,tz,s["planned_days"],now)
     result["session"]={k:s[k] for k in ("id","name","started_at","ended_at","planned_days")}
     result["timezone"]={"name":tz_name,"exact":tz_ok}
     result["roles"]=roles
     result["texts"]=assessment.report_text(result)
     return result
 
-def session_report(sid,now=None):
-    """AB-020 AC-06: printable report of a measuring job (HTML). Read-only on the local DB."""
+def session_report(sid,now=None,frozen_at=None,result=None):
+    """AB-020 AC-06 / AB-025: report of one job (HTML). A stopped job returns its frozen report."""
+    s=get_session(sid)
+    if not s:return None
+    if frozen_at is None:
+        stored=_session_blob(sid,"report_html")
+        if stored:return stored
     now=now or utcnow()
-    result=session_assessment(sid,now)
-    if result is None:return None
-    s=get_session(sid);end=s["ended_at"] or now.isoformat()
+    result=result or session_assessment(sid,now)
+    end=s["ended_at"] or now.isoformat()
+    cfg=session_history(sid,end)[-1][1]
     with connect() as c:
-        ticks=[coverage.parse(r[0]) for r in c.execute("SELECT DISTINCT at FROM samples WHERE at>=? AND at<=? ORDER BY at",(s["started_at"],end))]
+        ticks=[coverage.parse(r[0]) for r in c.execute("SELECT DISTINCT at FROM samples WHERE session_id=? ORDER BY at",(sid,))]
         events=[{"at":a,"kind":k} for a,k in c.execute("SELECT at,kind FROM app_events WHERE at>=? AND at<=? ORDER BY at",(s["started_at"],end))]
-        cfg=load_v2();fields=devices.entities(heat_source(cfg));params=[]
+        fields=devices.entities(heat_source(cfg));params=[]
         for sid_,f in fields.items():
             if f["kind"]!="setting":continue
-            row=c.execute("SELECT state FROM samples WHERE entity_id=? AND at<=? ORDER BY at DESC LIMIT 1",(sid_,end)).fetchone()
-            if row and row[0] not in ("unavailable","unknown",""):params.append((f["label"],row[0],f["unit"]))
+            # AB-025: last value recorded *within this job*; nothing older, nothing from another job.
+            row=c.execute("SELECT state FROM samples WHERE session_id=? AND entity_id=? ORDER BY at DESC LIMIT 1",(sid,sid_)).fetchone()
+            ok=row and row[0] not in ("unavailable","unknown","")
+            params.append((f["label"],row[0] if ok else "im Auftrag nicht gemessen",f["unit"] if ok else ""))
     start_dt=coverage.parse(s["started_at"]);end_dt=coverage.parse(end);ticks=[t for t in ticks if t]
     def gap(a,b,ongoing=False):return {"start":a,"end":b,"ongoing":ongoing,"minutes":round((b-a).total_seconds()/60)}
     if not ticks:
@@ -461,8 +530,20 @@ def session_report(sid,now=None):
         if (ticks[0]-start_dt).total_seconds()>coverage.WARN_SECONDS:gaps.insert(0,gap(start_dt,ticks[0]))
     gaps=[dict(g,start=g["start"].isoformat(),end=g["end"].isoformat()) for g in gaps]
     tz,tz_name,_=plant_timezone()
-    labels=entity_labels(cfg)
-    return report.render(s,result,gaps,events,params,labels,tz,tz_name,VERSION,now)
+    return report.render(s,result,gaps,events,params,entity_labels(cfg),tz,tz_name,s.get("app_version") or VERSION,now,frozen_at=frozen_at)
+
+def session_csv(sid):
+    """CSV of one job: only its own samples, labelled with its own configuration (AB-025)."""
+    import csv,io
+    s=get_session(sid)
+    if not s:return None
+    cfg=session_history(sid,s["ended_at"])[-1][1];labels=entity_labels(cfg)
+    buf=io.StringIO();w=csv.writer(buf,delimiter=";")
+    w.writerow(["zeit_utc","entity_id","bezeichnung","zustand","wert_normiert","einheit","qualitaet"])
+    with connect() as c:
+        for at,eid,st,unit,q,nv,nu in c.execute("SELECT at,entity_id,state,unit,quality,normalized_value,normalized_unit FROM samples WHERE session_id=? ORDER BY at,entity_id",(sid,)):
+            w.writerow([at,eid,labels.get(eid,""),st,"" if nv is None else nv,nu or unit or "",q or "unchecked"])
+    return buf.getvalue()
 
 def log_event(kind,detail=None):
     with connect() as c:c.execute("INSERT INTO app_events(at,kind,detail) VALUES(?,?,?)",(utcnow().isoformat(),kind,detail))
@@ -571,7 +652,7 @@ class API(BaseHTTPRequestHandler):
         if path.startswith("/api/v2/sessions/") and path.endswith("/export.csv"):
             s=get_session(path.split("/")[4])
             if not s:return self.send_json(404,{"error":"Messauftrag nicht gefunden"})
-            body=("\ufeff"+export_csv(start=s["started_at"],end=s["ended_at"])).encode()
+            body=("\ufeff"+session_csv(s["id"])).encode()
             self.send_response(200)
             self.send_header("Content-Type","text/csv; charset=utf-8")
             self.send_header("Content-Disposition","attachment; filename=autobalance-"+s["id"]+".csv")

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import assessment  # noqa: E402
+import report  # noqa: E402
 import model  # noqa: E402
 import server  # noqa: E402
 
@@ -29,6 +30,10 @@ def config(rooms=(("wz", "Wohnzimmer", ["sensor.wz"], ["binary_sensor.f_wz"], 21
                              "heat_load": model.empty_heat_load(), "design_indoor_c": None, "design_indoor_reference": "",
                              "temperature_sensors": list(sensors), "window_sensors": list(windows)})
     return cfg
+
+
+def p_end(r):
+    return datetime.fromisoformat(r["window"]["end"])
 
 
 class Plant:
@@ -219,6 +224,51 @@ class AssessmentTests(unittest.TestCase):
         empty.ticks = []
         self.assertEqual(empty.run()["stage"], "no_data")
 
+    def test_ac6_02_without_heating_signal_no_level_statement(self):
+        roles = dict(ROLES, heating_active=None, hp_activity=None)
+        r = Plant().run(roles=roles)
+        self.assertEqual(r["stage"], "unverified")
+        self.assertIn("Heizbetrieb nur in 0 durch gültige Statuswerte", " ".join(assessment.report_text(r)))
+        self.assertIn("Kein Betriebsstatus der Wärmepumpe zugeordnet", " ".join(r["reasons"]))
+        roles = dict(ROLES, hp_activity=None, dhw=None)       # heating known, disturbances not checked
+        r = Plant(outdoor=lambda t: 2.0).run(roles=roles)
+        self.assertEqual(r["stage"], "level")
+        self.assertEqual(r["stage_text"], assessment.STAGE_TEXT["level"])      # notice is separate, not appended
+        self.assertEqual(r["disturbance_notice"], "WW-/Abtauphasen nicht zuverlässig erfasst. Messergebnis fachlich eingeschränkt.")
+        self.assertTrue(r["restricted"])
+        self.assertEqual(r["restricted_label"], "Vorläufig · fachlich eingeschränkt")
+        r["texts"] = assessment.report_text(r)
+        html = report.render({"name": "T", "started_at": r["window"]["start"], "ended_at": None, "note": ""}, r, [], [], [], {},
+                             timezone.utc, "UTC", "t", p_end(r))
+        self.assertIn("Vorläufig · fachlich eingeschränkt: " + assessment.STAGE_TEXT["level"], html)
+        self.assertIn('class="result warn" id="report-result"', html)
+
+    def test_review7_e_status_assigned_but_unavailable_all_nights(self):
+        p = Plant()
+        p.set("binary_sensor.heat", p.start, p.end, s="unavailable", ok=False)
+        p.set("sensor.act", p.start, p.end, s="unavailable", ok=False)
+        r = p.run()
+        self.assertEqual(r["stage"], "unverified")
+        self.assertGreaterEqual(r["technical_nights"], 6)
+        self.assertEqual(r["valid_nights"], 0)
+        self.assertIn("Nur 0 von", " ".join(r["reasons"]))
+
+    def test_heating_status_missing_in_part_of_the_nights(self):
+        p = Plant(outdoor=by_night({1: 4, 2: 4, 3: -6, 4: -5, 5: 4, 6: 4, 7: 4}))
+        p.set("binary_sensor.heat", local(3, 12), local(5, 12), s="unknown", ok=False)
+        p.set("sensor.act", local(3, 12), local(5, 12), s="unknown", ok=False)
+        r = p.run()
+        self.assertEqual(r["technical_nights"], 7)
+        self.assertEqual(r["valid_nights"], 5)           # nights 3 and 4 not counted
+        self.assertFalse(next(n for n in r["nights"] if n["date"] == "2026-12-03")["heating_verified"])
+        self.assertEqual(r["stage"], "level")            # cold nights unverified -> must not create a slope
+
+    def test_ac6_03_slope_examples(self):
+        ok = Plant(outdoor=by_night({1: -6, 2: -5, 3: 3, 4: 4, 5: 4, 6: 4, 7: 4})).run()
+        self.assertEqual(ok["stage"], "level_and_slope")
+        no = Plant(outdoor=by_night({1: -6, 2: -5, 3: 2, 4: 4, 5: 2, 6: 2, 7: 2})).run()
+        self.assertEqual(no["stage"], "level")
+
     def test_running_job_is_provisional(self):
         p = Plant(days=4)
         r = assessment.assess(p.start, p.end, p.ticks, p.values, p.history, ROLES, TZ, planned_days=7)
@@ -250,14 +300,17 @@ class ServerTests(unittest.TestCase):
                 row = p.values[t]
                 for eid in ("sensor.out", "sensor.vl", "sensor.wz", "binary_sensor.f_wz"):
                     x = row[eid]
-                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value) VALUES(?,?,?,?,?,?,?)",
-                              (t.isoformat(), eid, x["s"], "", 1, "ok", x["v"]))
+                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value,session_id) VALUES(?,?,?,?,?,?,?,?)",
+                              (t.isoformat(), eid, x["s"], "", 1, "ok", x["v"], s["id"]))
         with patch("urllib.request.urlopen", side_effect=AssertionError("no network")):
             r = server.session_assessment(s["id"], now=p.end)
         self.assertEqual(r["roles"]["outdoor"], "sensor.out")
         self.assertIsNone(r["roles"]["outdoor_damped"])
-        self.assertEqual(r["valid_nights"], 4)
-        self.assertEqual(r["stage"], "level")
+        self.assertEqual(r["technical_nights"], 4)
+        self.assertEqual(r["valid_nights"], 0)
+        # AC6-02: HA assignment without heating-mode signal -> descriptive only, no level statement
+        self.assertEqual(r["stage"], "unverified")
+        self.assertIn("Heizbetrieb nicht nachgewiesen", r["stage_text"])
         self.assertTrue(r["read_only"])
         self.assertIsNone(server.session_assessment("ma_unknown"))
 
