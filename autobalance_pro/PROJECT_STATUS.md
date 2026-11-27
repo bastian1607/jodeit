@@ -6,6 +6,12 @@
 - Code: [bastian1607/jodeit – autobalance_pro](https://github.com/bastian1607/jodeit/tree/main/autobalance_pro), maßgeblich ist `main`.
 - Outline: [Pilotplanung](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD) · [Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS) · [AB-008 Datenmodell v2](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt) · [AB-009 Oberfläche](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-009-ubergabe-an-chatgpt-oberflache-fur-datenmodell-v2-wF0mbKy2cy) · [Zusammenarbeit](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM); Kurzregeln: [CLAUDE.md](CLAUDE.md).
 
+## Stand v0.5.0 (Release freigegeben von Bastian am 27.11.2026)
+
+- AB-025 (PR #20), AB-026 (PR #21), AB-027 (PR #22); Reviews ChatGPT 7–11 in Outline.
+- Tests: 195 lokale Tests inkl. Chromium auf `main` `918c0be`. HA-Test der Migration folgt nach Installation.
+- Offen: AB-028, HA-Backup/Restore-Prozess Messkoffer, AB-022 P1/P2, AB-016.
+
 ## Stand v0.4.0 (Release freigegeben von Bastian am 27.11.2026)
 
 - AB-013 (PR #14), AB-014 (PR #15), AB-020 AC-06 Messbericht (PR #16), AB-023 Profilerkennung (PR #17),
