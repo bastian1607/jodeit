@@ -161,6 +161,7 @@ details.card>.body{padding:0 12px 12px}
 <h3>Messauftrag</h3>
 <p class="hint">Ein Messauftrag grenzt den ausgewerteten Zeitraum je Einsatzort ab (Ziel ca. 7 Tage). Er speichert nur lokal und sendet nichts an Home Assistant oder die Wärmepumpe.</p>
 <div id="session-panel"></div>
+<div id="assessment"></div>
 <h3>Datenabdeckung der letzten 7 Tage</h3>
 <p class="hint">Zeiträume ohne gespeicherte Messung bleiben als Lücke sichtbar, auch nach einem Neustart. Es werden keine Werte nachträglich aufgefüllt.</p>
 <div id="data-quality">Wird geladen …</div>
@@ -884,8 +885,38 @@ async function renderSessions(){
     if(!monitored.length){const w=document.createElement('p');w.className='warn-box';w.textContent='Für einen Messauftrag mindestens einem Raum einen Temperaturfühler zuordnen.';form.append(w)}
     root.append(form);
   }
+  const target=a||sessionsData.sessions[0];
+  if(target)await renderAssessment(target.id);else el('assessment').replaceChildren();
   const done=sessionsData.sessions.filter(s=>s.ended_at);
   if(done.length){const h=document.createElement('p');h.className='hint';h.textContent='Beendete Messaufträge: '+done.map(s=>s.name+' ('+dateText(s.started_at)+' – '+dateText(s.ended_at)+')').join('; ');root.append(h)}
+}
+/* ---------- AB-014 Aussagekraft des Messauftrags (nur lesend) ---------- */
+const STAGE_KIND={no_data:'warn',insufficient:'bad',level:'warn',level_and_slope:'good'};
+const DIST_TEXT={dhw:'Warmwasser',defrost:'Abtauung',heating_off:'kein Heizbetrieb',change:'Parameter-/Sollwertänderung',window:'Fenster offen'};
+function num1(v){return v===null||v===undefined?'–':Number(v).toLocaleString('de-DE',{maximumFractionDigits:1})}
+async function renderAssessment(id){
+  const root=el('assessment');if(!root)return;root.replaceChildren();
+  let r;try{r=await api('v2/sessions/'+encodeURIComponent(id)+'/assessment')}catch(_){root.textContent='Auswertung derzeit nicht abrufbar.';return}
+  const h=document.createElement('h3');h.textContent='Heizkurvenbewertung fachlich möglich? · '+r.session.name;root.append(h);
+  const head=document.createElement('div');head.className='item';head.id='assessment-stage';
+  head.append(badge(r.stage_text,STAGE_KIND[r.stage]));
+  const facts=document.createElement('p');
+  facts.textContent='Messdauer '+num1(r.window.hours)+' h von geplant '+r.window.planned_days+' Tagen · geeignete Nächte: '+r.valid_nights+' · verwertbare Stunden: '+num1(r.valid_hours)+
+    ' · Außentemperatur '+(r.outdoor_band.damped?'(gedämpft) ':'(ungedämpft) ')+(r.outdoor_band.min===null?'–':num1(r.outdoor_band.min)+' bis '+num1(r.outdoor_band.max)+' °C, Spanne '+num1(r.outdoor_band.span_k)+' K')+'.';
+  head.append(facts);
+  for(const t of r.reasons){const p=document.createElement('p');p.className='hint';p.textContent=t;head.append(p)}
+  root.append(head);
+  if(r.missing_basis.length){const w=document.createElement('div');w.className='warn-box';w.id='assessment-basis';w.textContent='Fehlende Aussagegrundlage: '+r.missing_basis.join(' · ');root.append(w)}
+  const list=document.createElement('div');list.id='assessment-nights';
+  for(const n of r.nights){const row=document.createElement('div');row.className='item row';
+    const l=document.createElement('span');l.textContent='Nacht '+new Date(n.date+'T12:00').toLocaleDateString('de-DE')+' · '+num1(n.ok_hours)+' h verwertbar · außen '+num1(n.outdoor_median)+' °C';
+    const d=n.disturbances.map(x=>DIST_TEXT[x]||x);
+    row.append(l,badge(n.valid?'geeignet':'nicht geeignet'+(d.length?' · '+d.join(', '):''),n.valid?'good':'warn'));list.append(row)}
+  root.append(list);
+  const rooms=document.createElement('p');rooms.className='hint';
+  rooms.textContent='Räume in geeigneten Nächten (Median Ist − Soll): '+r.rooms.map(x=>x.name+' '+(x.monitored?(x.deviation_median_k===null?'keine Daten':(x.deviation_median_k>0?'+':'')+num1(x.deviation_median_k)+' K'+(x.stationary===false?' (nicht stationär)':'')):'nicht überwacht')).join(' · ');
+  root.append(rooms);
+  const note=document.createElement('p');note.className='hint';note.textContent='Pilotregelwerk (Schwellen noch im Feld zu bestätigen). AutoBalance berechnet keine Parameteränderung und schreibt nichts an die Wärmepumpe.';root.append(note);
 }
 async function stats(){
   try{const m=await api('overview');acquisitionStatus(m.acquisition||{});

@@ -579,6 +579,42 @@ class AcceptanceTests(V2Browser):
         expect(self.page.locator("#notice")).to_contain_text("keine sichere Zufallsquelle")
         expect(self.page.locator("#room-editor")).to_be_hidden()
 
+    def test_ab014_assessment_of_running_job(self):
+        """AB-014: Stufe, Nächte und fehlende Aussagegrundlage sichtbar; keine Parameterempfehlung."""
+        import sqlite3
+        from datetime import timedelta
+        start = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(days=4)
+        with sqlite3.connect(server.DB) as c:      # fresh-install baseline carries "now"; this test travels back in time
+            c.execute("DELETE FROM config_history")
+        with patch.object(server, "utcnow", return_value=start - timedelta(hours=1)):   # configured before the job
+            cfg = self.seed(rooms=("Wohnzimmer", "Bad"))
+            cfg["rooms"][1]["temperature_sensors"] = []
+            cfg["building"]["entities"]["outdoor"] = "sensor.aussen"
+            cfg["circuits"][0]["entities"]["flow"] = "sensor.vl"
+            self.put_v2(cfg)
+        with patch.object(server, "utcnow", return_value=start):
+            server.start_session({"name": "Pilot Anlage 1", "confirmed": True})
+        with sqlite3.connect(server.DB) as c:
+            t = start
+            while t < datetime.now(timezone.utc):
+                for eid, v in (("sensor.aussen", 2.0), ("sensor.vl", 40.0), ("sensor.wohnzimmer_t", 20.7)):
+                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value) VALUES(?,?,?,?,?,?,?)",
+                              (t.isoformat(), eid, str(v), "°C", 1, "ok", v))
+                t += timedelta(minutes=5)
+        self.open()
+        self.tab("5 Prüfen & Messung")
+        stage = self.page.locator("#assessment-stage")
+        expect(stage).to_contain_text("Niveau im Messbereich prüfbar")
+        expect(stage).to_contain_text("vorläufig")
+        expect(self.page.locator("#assessment-basis")).to_contain_text("Abtauung nicht erkennbar")
+        expect(self.page.locator("#assessment-nights")).to_contain_text("geeignet")
+        expect(self.page.locator("#assessment")).to_contain_text("Bad nicht überwacht")
+        content = self.page.content()
+        for forbidden in ("Offset auf", "Heizkurve anheben", "Empfehlung übernehmen"):
+            self.assertNotIn(forbidden, content)
+        self.shot("ab014-auswertung")
+
+
 class MobileTests(V2Browser):
     viewport = {"width": 390, "height": 844}
 

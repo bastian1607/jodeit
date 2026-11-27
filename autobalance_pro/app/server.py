@@ -1,7 +1,7 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
 import json,sys,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
-import model,coverage,devices,monitoring,uuid
+import model,coverage,devices,monitoring,assessment,uuid
 from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -312,7 +312,7 @@ def rooms_status(now=None):
 def config_history(start=None,end=None):
     """[(at, cfg)] ascending; includes the last version before ``start`` so the state at start is known."""
     with connect() as c:
-        rows=c.execute("SELECT at,value FROM config_history ORDER BY id").fetchall()
+        rows=c.execute("SELECT at,value FROM config_history ORDER BY at,id").fetchall()
     out=[(at,json.loads(v)) for at,v in rows]
     if start:
         before=[x for x in out if x[0]<=start]
@@ -375,6 +375,57 @@ def stop_session(sid,now=None):
         with connect() as c:c.execute("UPDATE sessions SET ended_at=? WHERE id=?",((now or utcnow()).isoformat(),sid))
     log_event("session_stop",sid)
     return get_session(sid)
+
+def plant_timezone():
+    """Local time zone of the plant for the night definition (AB-014). HA passes TZ to apps."""
+    name=os.environ.get("TZ") or "Europe/Berlin"
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name),name,True
+    except Exception:
+        logging.warning("Zeitzone %s nicht verfügbar – MEZ (UTC+1) angenommen",name)
+        return timezone(timedelta(hours=1)),"UTC+01:00 (Ersatz)",False
+
+PARAM_KEYS=("curve_design","curve_offset","curve_base","curve_max","room_set","mode","control_mode","min_ext")
+def assessment_roles(cfg):
+    """Which stored entity plays which role. Heat-source profile first, then manual HA assignment."""
+    fields={f["key"]:sid for sid,f in devices.entities(heat_source(cfg)).items()}
+    b=cfg["building"]["entities"];c=(cfg.get("circuits") or [{}])[0].get("entities",{})
+    pick=lambda *xs:next((x for x in xs if x),None)
+    return {"outdoor_damped":fields.get("outdoor_damped"),"outdoor":pick(fields.get("outdoor"),b.get("outdoor")),
+        "flow":pick(fields.get("flow"),c.get("flow")),"flow_target":pick(fields.get("flow_target"),c.get("flow_target")),
+        "return":pick(fields.get("return"),c.get("return")),"heating_active":fields.get("heating_active"),
+        "dhw":pick(fields.get("dhw_charging"),b.get("dhw")),"hp_activity":fields.get("hp_activity"),
+        "params":[fields[k] for k in PARAM_KEYS if k in fields]}
+
+def session_assessment(sid,now=None):
+    """AB-014: evaluate a measuring job from stored data only (read-only)."""
+    s=get_session(sid)
+    if not s:return None
+    now=now or utcnow()
+    start=coverage.parse(s["started_at"]);end=coverage.parse(s["ended_at"]) if s["ended_at"] else now
+    history=[(coverage.parse(at),cfg) for at,cfg in config_history(s["started_at"],end.isoformat())]
+    cfg=history[-1][1] if history else load_v2()
+    roles=assessment_roles(cfg)
+    ids=set(x for k,x in roles.items() if k!="params" and x)|set(roles["params"])
+    for _,h in history:
+        for r in h.get("rooms",[]):ids.update(r.get("temperature_sensors",[]));ids.update(r.get("window_sensors",[]))
+    values={}
+    with connect() as c:
+        tick_rows=[r[0] for r in c.execute("SELECT DISTINCT at FROM samples WHERE at>=? AND at<=? ORDER BY at",(s["started_at"],end.isoformat()))]
+        for at,eid,state,valid,q,nv in c.execute("SELECT at,entity_id,state,valid,quality,normalized_value FROM samples WHERE at>=? AND at<=?",(s["started_at"],end.isoformat())):
+            if eid not in ids:continue
+            t=coverage.parse(at)
+            if t is None:continue
+            values.setdefault(t,{})[eid]={"v":nv,"s":state,"ok":bool(valid) and (q in (None,"ok"))}
+    ticks=sorted(t for t in (coverage.parse(x) for x in tick_rows) if t)
+    tz,tz_name,tz_ok=plant_timezone()
+    result=assessment.assess(start,end,ticks,values,history or [(start,cfg)],roles,tz,s["planned_days"],now)
+    result["session"]={k:s[k] for k in ("id","name","started_at","ended_at","planned_days")}
+    result["timezone"]={"name":tz_name,"exact":tz_ok}
+    result["roles"]=roles
+    result["texts"]=assessment.report_text(result)
+    return result
 
 def log_event(kind,detail=None):
     with connect() as c:c.execute("INSERT INTO app_events(at,kind,detail) VALUES(?,?,?)",(utcnow().isoformat(),kind,detail))
@@ -465,6 +516,9 @@ class API(BaseHTTPRequestHandler):
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
         if path=="/api/v2/rooms/status":return self.send_json(200,rooms_status())
         if path=="/api/v2/sessions":return self.send_json(200,list_sessions())
+        if path.startswith("/api/v2/sessions/") and path.endswith("/assessment"):
+            result=session_assessment(path.split("/")[4])
+            return self.send_json(200,result) if result else self.send_json(404,{"error":"Messauftrag nicht gefunden"})
         if path=="/api/v2/target-changes":return self.send_json(200,{"changes":target_changes()})
         if path=="/api/v2/export.csv":
             body=("\ufeff"+export_csv()).encode()
