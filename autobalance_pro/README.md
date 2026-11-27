@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.4.0
+# Jodeit AutoBalance Pro v0.5.0
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -61,6 +61,25 @@
   Kundendaten ohne vorher extern verwahrte Liste der gelöschten Messungs-IDs (`/share/autobalance/…json`); nach
   einer Wiederherstellung vor der nächsten Kundenmessung bereinigen und prüfen. HA-Sicherungen auf dem Messkoffer
   dokumentiert der Techniker und ersetzt/löscht sie bei Fälligkeit gezielt (Betriebsanweisung in Outline).
+
+## Änderungen in v0.5.0 (freigegeben 27.11.2026)
+
+Weiterhin rein lesend: keine Steuerbefehle an Wärmepumpe, Ventile oder Home Assistant.
+
+- AB-025: Messdaten, Konfigurationsstand und Bericht je Messauftrag getrennt (`samples.session_id`);
+  Abschlussbericht wird beim Stoppen festgeschrieben. Heizbetrieb je Nacht über gültige Statuswerte
+  nachgewiesen; ohne Nachweis keine Niveau-/Steigungsaussage, ohne WW-/Abtaunachweis „Vorläufig ·
+  fachlich eingeschränkt“. Fühlerprüfung mit Bestätigung vor Messbeginn.
+- AB-026: Löschung 30 Tage nach Messende **nur im Messkoffer-Modus** (Option `messkoffer`, Standard aus),
+  Ablage in Kundenakte bestätigen, manuelles Löschen, „Messgerät für nächsten Kunden vorbereiten“,
+  Löschregister in `/share/autobalance`. Stationär wird nichts automatisch gelöscht.
+- AB-027: Unveränderte Temperaturwerte gelten nicht mehr als veraltet (viele Fühler melden nur bei
+  Änderung). HA-Zeitstempel korrekt benannt; Hinweis nach 12 h/24 h ohne neue Meldung. Werte, die bis
+  v0.4.0 als veraltet verworfen wurden, bleiben verworfen.
+- Migration additiv (neue Spalten/Tabellen, laufende v0.4.0-Messungen werden ihrem Auftrag zugeordnet).
+  Rückweg: HA-Sicherung vor dem Update wiederherstellen.
+- Offen: AB-028 (Fühlerprüfung in Auswertung/Bericht vor verbindlicher Heizkurven-Abnahme),
+  HA-Sicherungs-/Restore-Prozess vor Mehrkunden-Einsatz des Messkoffers.
 
 ## Änderungen in v0.4.0 (freigegeben 27.11.2026)
 
