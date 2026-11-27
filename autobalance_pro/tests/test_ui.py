@@ -105,7 +105,21 @@ class BrowserTests(unittest.TestCase):
         self.entities[0]['source_at'] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         server.sample()
         self.page.get_by_role('button', name='Aktualisieren', exact=True).click()
-        expect(self.page.locator('#sample-list')).to_contain_text('Veraltet')
+        expect(self.page.locator('#sample-list')).to_contain_text('Gültig')          # AB-027: unchanged value, not stale
+        expect(self.page.locator('#sample-list')).not_to_contain_text('Veraltet')
+        self.entities[0]['source_at'] = (datetime.now(timezone.utc) - timedelta(hours=13)).isoformat()
+        self.entities[0]['source_at_kind'] = 'reported'
+        server.sample()
+        self.page.get_by_role('button', name='Aktualisieren', exact=True).click()
+        hint = self.page.locator('#sample-list .unchanged-hint')                       # review 11 (P2)
+        expect(hint).to_contain_text('Seit 13 h keine neuere Meldung bei Home Assistant erkennbar')
+        expect(hint).to_contain_text('ein Lebenszeichen des Fühlers ist damit nicht separat bestätigt')
+        expect(self.page.locator('#sample-list')).to_contain_text('Letzte Meldung an Home Assistant')
+        expect(self.page.locator('#sample-list')).not_to_contain_text('unverändert')     # no claim about a temperature change
+        self.entities[0]['source_at_kind'] = None                                      # older samples: kind unknown
+        server.sample()
+        self.page.get_by_role('button', name='Aktualisieren', exact=True).click()
+        expect(hint).to_contain_text('keine neuere Meldung oder Aktualisierung bei Home Assistant erkennbar')
         self.entities[0]['state'] = 'unknown'
         server.sample()
         self.page.get_by_role('button', name='Aktualisieren', exact=True).click()
