@@ -26,6 +26,8 @@ import re
 import uuid
 from datetime import date
 
+import devices
+
 SCHEMA_VERSION = 2
 DEFAULT_CIRCUIT_ID = "hk1"
 
@@ -77,6 +79,7 @@ def empty():
             "heat_pump": {"manufacturer": "", "model": "", "nominal_power_kw": None,
                           "min_flow_l_h": None, "min_flow_reference": ""},
             "entities": {"outdoor": "", "compressor": "", "dhw": ""},
+            "heat_source": devices.empty_source(),   # AB-015, read-only device profile
         },
         "circuits": [empty_circuit()],
         "rooms": [],
@@ -377,6 +380,11 @@ def _validate_building(building):
     _check_entity(entities.get("outdoor"), {"sensor"}, "Außentemperatur")
     _check_entity(entities.get("compressor"), {"sensor", "binary_sensor"}, "Verdichter")
     _check_entity(entities.get("dhw"), {"sensor", "binary_sensor"}, "Warmwasser")
+    if "heat_source" in building:  # optional: configurations before AB-015 have none
+        try:
+            building["heat_source"] = devices.validate_source(building["heat_source"])
+        except ValueError as exc:
+            _fail(str(exc))
 
 
 def _validate_circuit(circuit):

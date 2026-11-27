@@ -46,6 +46,7 @@ details.card>.body{padding:0 12px 12px}
 .status.bad{background:#fde4e4;color:#941f1f}
 .status.good{background:#e1f4e9;color:#15583b}
 .warn-box{background:#fff2da;border-radius:8px;padding:10px;margin:8px 0;font-size:13px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}.kv .item{margin:0;padding:9px 11px}
 .info-box{background:#eef2f4;border-radius:8px;padding:10px;margin:8px 0;font-size:13px}
 .pair-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin:6px 0}
 .blocker-link{display:block;width:100%;text-align:left;margin:6px 0;background:#fff}
@@ -67,6 +68,7 @@ details.card>.body{padding:0 12px 12px}
 </nav>
 
 <section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div class="grid" id="stats"></div>
+<div id="heat-snapshot"></div>
 <p>Beginne mit den Räumen: Name und mindestens ein Temperaturfühler reichen für die Messung. Heizlast, Heizkreise und Heizflächen kannst du später ergänzen.</p>
 <button class="primary" data-goto="rooms">Räume einrichten</button></section>
 
@@ -127,7 +129,17 @@ details.card>.body{padding:0 12px 12px}
 <div><label>Außentemperatur (HA)</label><div id="hp-outdoor"></div></div>
 <div><label>Verdichterstatus (HA)</label><div id="hp-compressor"></div></div>
 <div><label>Warmwasserstatus (HA)</label><div id="hp-dhw"></div></div>
-</div></div></details>
+</div>
+<h3>Wärmepumpe und Heizkurve auslesen (nur lesen)</h3>
+<p class="hint">Mit einem Geräteprofil liest AutoBalance Heizkurve, Vorlauf/Rücklauf und Betriebszustand der Wärmepumpe mit. Es werden keine Werte an die Wärmepumpe gesendet.</p>
+<div class="grid">
+<div><label for="hs-profile">Geräteprofil</label><select id="hs-profile"><option value="">Kein Profil</option></select></div>
+<div><label for="hs-source">Datenquelle</label><select id="hs-source"><option value="ha">Home Assistant (MQTT)</option><option value="emsesp_rest">EMS-ESP direkt (REST, nur lesen)</option></select></div>
+<div id="hs-host-wrap"><label for="hs-host">IP-Adresse des EMS-ESP / BBQKees</label><input id="hs-host" placeholder="z. B. 192.168.178.69" autocomplete="off"></div>
+</div>
+<div class="actions"><button type="button" id="hs-test">Verbindung prüfen (nur lesen)</button></div>
+<div id="hs-result"></div>
+</div></details>
 <div class="row"><h3>Heizkreise</h3><button type="button" id="add-circuit">+ Heizkreis</button></div>
 <div id="circuit-list"></div>
 <div class="actions"><button class="primary" type="submit">Anlage speichern</button><button type="button" id="reset-plant">Änderungen verwerfen</button></div>
@@ -150,7 +162,7 @@ details.card>.body{padding:0 12px 12px}
 </main>
 <script>
 'use strict';
-let cfg=null,saved=null,entities=[],catalog=[],readinessData=null;
+let cfg=null,saved=null,entities=[],catalog=[],readinessData=null,hsProfiles=[];
 let editingRoom=null,isNewRoom=false,roomDirty=false,plantDraft=null,plantDirty=false;
 let saveChain=Promise.resolve();
 const el=id=>document.getElementById(id);
@@ -533,8 +545,31 @@ function showPlant(){
   plantPickers.outdoor=single(el('hp-outdoor'),'temp',b.entities.outdoor,markPlantDirty);
   plantPickers.compressor=single(el('hp-compressor'),'status',b.entities.compressor,markPlantDirty);
   plantPickers.dhw=single(el('hp-dhw'),'status',b.entities.dhw,markPlantDirty);
+  const hs=b.heat_source||{profile:'',source:'ha',emsesp_host:''};
+  const sel=el('hs-profile');sel.replaceChildren(new Option('Kein Profil',''));for(const p of hsProfiles)sel.append(new Option(p.label,p.key));
+  sel.value=hs.profile||'';el('hs-source').value=hs.source||'ha';el('hs-host').value=hs.emsesp_host||'';
+  el('hs-result').replaceChildren();syncHeatSource();
   drawCircuits();
 }
+function syncHeatSource(){
+  const on=Boolean(el('hs-profile').value);
+  el('hs-source').disabled=!on;el('hs-test').disabled=!on;
+  el('hs-host-wrap').classList.toggle('hidden',!on||el('hs-source').value!=='emsesp_rest');
+}
+function heatSourceDraft(){return {profile:el('hs-profile').value,source:el('hs-source').value,emsesp_host:el('hs-host').value.trim()}}
+for(const id of ['hs-profile','hs-source','hs-host'])el(id).addEventListener('input',()=>{syncHeatSource();markPlantDirty()});
+el('hs-test').addEventListener('click',async()=>{
+  const root=el('hs-result');root.textContent='Wird gelesen …';
+  try{const r=await api('v2/heat-source/test','POST',heatSourceDraft());
+    root.replaceChildren();
+    const head=document.createElement('div');head.className='item';head.id='hs-summary';
+    head.append(badge(r.found+' von '+r.total+' Werten gefunden',r.found===r.total?'good':r.found?'warn':'bad'));
+    if(Object.keys(r.errors).length){const e=document.createElement('p');e.className='hint';e.textContent='Nicht erreichbar: '+Object.keys(r.errors).join(', ');head.append(e)}
+    root.append(head);
+    for(const f of r.fields){const row=document.createElement('div');row.className='item row';const n=document.createElement('span');n.textContent=f.label;
+      row.append(n,f.found?badge(f.value+(f.unit?' '+f.unit:''),'good'):badge('nicht gefunden','warn'));root.append(row)}
+  }catch(ex){root.textContent='Prüfung fehlgeschlagen: '+ex.message}
+});
 function markPlantDirty(){plantDirty=true}
 el('plant-form').addEventListener('input',markPlantDirty);el('plant-form').addEventListener('change',markPlantDirty);
 function pairRow(container,a,b,labels,onRemove){
@@ -626,6 +661,8 @@ el('plant-form').addEventListener('submit',async ev=>{
     nominal_power_kw:readNum('#hp-power','Nennheizleistung',errors),min_flow_l_h:readNum('#hp-minflow','Mindestvolumenstrom',errors),min_flow_reference:el('hp-minflow-ref').value.trim()};
   if(b.heat_pump.min_flow_l_h!==null&&!b.heat_pump.min_flow_reference)errors.push('Mindestvolumenstrom bitte nur mit Quelle angeben (z. B. Herstellerunterlage).');
   b.entities={outdoor:plantPickers.outdoor(),compressor:plantPickers.compressor(),dhw:plantPickers.dhw()};
+  b.heat_source=heatSourceDraft();
+  if(b.heat_source.profile&&b.heat_source.source==='emsesp_rest'&&!b.heat_source.emsesp_host)errors.push('Für EMS-ESP direkt bitte die IP-Adresse eintragen.');
   if(errors.length)return notice(errors.join(' '),true);
   const next=clone(cfg);next.building=b;next.circuits=circuits;
   const ids=new Set(circuits.map(c=>c.id));
@@ -734,11 +771,34 @@ function renderDataQuality(){
   for(const id of dqData.entities_without_samples||[]){const row=document.createElement('div');row.className='item row';const n=document.createElement('span');n.textContent=id;row.append(n,badge('Noch keine Messung','warn'));list.append(row)}
   root.append(list);
 }
+/* ---------- AB-015 Wärmepumpe & Räume (nur lesen) ---------- */
+const HS_MAIN=['outdoor','outdoor_damped','flow_target','flow','return','heating_active','dhw_charging','hp_activity','curve_design','curve_base','curve_offset','curve_max','min_ext','room_set'];
+function hsValue(f){if(f.value===null||f.value===undefined)return 'keine Daten';const n=Number(f.value);const v=Number.isFinite(n)&&f.value!==''?n.toLocaleString('de-DE',{maximumFractionDigits:1}):String(f.value);return v+(f.unit?' '+f.unit:'')}
+async function renderHeatSnapshot(){
+  const root=el('heat-snapshot');if(!root)return;
+  let d;try{d=await api('v2/heat-source/latest')}catch(_){root.replaceChildren();return}
+  root.replaceChildren();if(!d.profile)return;
+  const h=document.createElement('h3');h.textContent='Wärmepumpe und Räume · nur lesen';root.append(h);
+  const p=document.createElement('p');p.className='hint';p.textContent=d.profile_label+' · Quelle: '+(d.source==='emsesp_rest'?'EMS-ESP direkt':'Home Assistant');root.append(p);
+  if(Object.keys(d.source_errors||{}).length){const w=document.createElement('div');w.className='warn-box';w.textContent='EMS-ESP teilweise nicht erreichbar: '+Object.keys(d.source_errors).join(', ');root.append(w)}
+  const grid=document.createElement('div');grid.className='kv';grid.id='hs-values';
+  const byKey=Object.fromEntries(d.fields.map(f=>[f.key,f]));
+  for(const k of HS_MAIN){const f=byKey[k];if(!f)continue;const box=document.createElement('div');box.className='item';
+    const l=document.createElement('span');l.className='hint';l.textContent=f.label;const v=document.createElement('div');v.textContent=hsValue(f);box.append(l,v);grid.append(box)}
+  root.append(grid);
+  const rooms=document.createElement('div');rooms.id='hs-rooms';
+  for(const r of d.rooms){const row=document.createElement('div');row.className='item row';const n=document.createElement('span');n.textContent=r.name;
+    const t=r.temperature===null?badge('nicht überwacht','warn'):badge(r.temperature.toLocaleString('de-DE',{maximumFractionDigits:1})+' °C · Soll '+String(r.target).replace('.',',')+' °C');
+    row.append(n,t);if(r.window_open)row.append(badge('Fenster offen','warn'));rooms.append(row)}
+  root.append(rooms);
+  const a=document.createElement('a');a.href='api/v2/export.csv';a.textContent='Messwerte der letzten 7 Tage als CSV herunterladen';a.setAttribute('download','');root.append(a);
+}
 async function stats(){
   try{const m=await api('overview');acquisitionStatus(m.acquisition||{});
     await loadDataQuality();dataQualityBanner();
     el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)],['Abdeckung 7 Tage',dqData?pct(dqData.coverage):'–'],['Messlücken 7 Tage',dqData?dqData.gaps.length:'–']].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
     renderDataQuality();
+    await renderHeatSnapshot();
   }catch(ex){acquisitionUnavailable()}
 }
 async function latest(){
@@ -752,6 +812,7 @@ async function boot(){
   try{
     cfg=await api('v2/config');saved=clone(cfg);
     try{catalog=(await api('v2/catalog')).valves}catch(_){catalog=[]}
+    try{hsProfiles=(await api('v2/heat-source/profiles')).profiles}catch(_){hsProfiles=[]}
     await loadReadiness();
     try{const d=await api('entities');entities=d.entities;notice(entities.length+' Home-Assistant-Entitäten geladen. Read-only.')}
     catch(ex){notice('HA-Entitäten derzeit nicht verfügbar: '+ex.message+' Bestehende Zuordnungen bleiben erhalten.',true)}

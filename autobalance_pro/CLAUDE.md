@@ -35,7 +35,7 @@ ChatGPT und Claude teilen **keinen automatisch synchronisierten Chat-Kontext**. 
 - Vor aktiven Versuchen: Stellmotor-Eignung und Fail-safe, Ventilkompatibilität, garantierten Mindestvolumenstrom, Kommunikations- und Gerätausfall, Abbruchbedingungen und hydraulische Grenzen nachweisen.
 - Motorhub-Prozent `!=` gemessene Liter pro Stunde; mechanische Eclipse-Voreinstellung nur aus hydraulischer Berechnung und geeigneten Messbefunden ableiten.
 - Thermische Zonen und hydraulische Heizkreise getrennt modellieren; mehrere Sensoren, Kontakte und Heizkörper pro Raum unterstützen.
-- BBQKees/EMS-ESP nur über **tatsächlich vorhandene** Home-Assistant-Entitäten anbinden. Noch nicht verfügbare Werte nicht erfinden.
+- BBQKees/EMS-ESP über **tatsächlich vorhandene** Home-Assistant-Entitäten oder **lesend** per EMS-ESP-REST (`GET http://<host>/api/<gerät>`) anbinden (Architekturentscheidung 26.11.2026, AB-015). Keine MQTT-Publishes, keine HA-Dienste, keine EMS-ESP-Kommandos. Noch nicht verfügbare Werte nicht erfinden; Profilfelder nur nach Prüfung an realer Anlage aufnehmen.
 - Lokal und ohne Cloud nutzbar halten; keine Secrets, Kundendaten, Tokens oder Passwörter in GitHub/Outline speichern. Nur Verweis auf Passwortmanager.
 
 ## Status und Kommunikationspflicht

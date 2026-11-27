@@ -88,7 +88,7 @@ class V2Browser(unittest.TestCase):
         for method, path in self.requests:
             self.assertTrue(path.startswith("/api/") or path in ("/", "/jodeit-logo.png"), path)
             if method == "POST":
-                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion"), path)
+                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test"), path)
 
     # ------------------------------------------------------------- helpers
     def v2(self):
@@ -564,6 +564,34 @@ class MobileTests(V2Browser):
         expect(gaps.nth(1)).to_contain_text("nicht erfasst (60 min)")
         expect(self.page.locator("#dq-entities")).to_contain_text("sensor.wohnzimmer_t")
         self.shot("ab020-messluecke")
+
+    def test_ab015_heat_source_profile_read_only(self):
+        """AB-015: choose profile, probe read-only, save, see heat pump next to rooms."""
+        self.seed(rooms=("Wohnzimmer",))
+        self.entities += [ent("number.thermostat_hc1_designtemp", "hc1 Design temperature", "54", "°C", ""),
+                          ent("number.thermostat_hc1_offsettemp", "hc1 Offset temperature", "-2.0", "°C", ""),
+                          ent("sensor.thermostat_hc1_targetflowtemp", "hc1 Target flow", "47", "°C", ""),
+                          ent("sensor.boiler_curflowtemp", "Vorlauf", "45", "°C", ""),
+                          ent("sensor.boiler_outdoortemp", "Außen", "-4.3", "°C", "")]
+        self.open()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        self.page.locator("#hs-profile").select_option("buderus-emsesp-hmc310")
+        expect(self.page.locator("#hs-host-wrap")).to_be_hidden()
+        self.page.locator("#hs-source").select_option("emsesp_rest")
+        expect(self.page.locator("#hs-host-wrap")).to_be_visible()
+        self.page.locator("#hs-source").select_option("ha")
+        self.page.get_by_role("button", name="Verbindung prüfen (nur lesen)").click()
+        expect(self.page.locator("#hs-summary")).to_contain_text("5 von 30 Werten gefunden")
+        self.page.get_by_role("button", name="Anlage speichern").click()
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        self.assertEqual(self.v2()["building"]["heat_source"]["profile"], "buderus-emsesp-hmc310")
+        server.sample()
+        self.tab("Übersicht")
+        self.page.reload()
+        expect(self.page.locator("#hs-values")).to_contain_text("54 °C")
+        expect(self.page.locator("#hs-values")).to_contain_text("-4,3 °C")
+        expect(self.page.locator("#hs-rooms")).to_contain_text("Wohnzimmer")
+        self.shot("ab015-waermepumpe-raeume")
 
 
 if __name__ == "__main__":

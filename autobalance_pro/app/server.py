@@ -1,7 +1,7 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
 import json,sys,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
-import model,coverage
+import model,coverage,devices
 from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -157,8 +157,10 @@ def get_entities():
     with urllib.request.urlopen(request,timeout=15) as response:items=json.load(response)
     if not isinstance(items,list):raise RuntimeError("Home Assistant lieferte keine Entitätenliste")
     return [{"entity_id":e.get("entity_id",""),"name":e.get("attributes",{}).get("friendly_name",e.get("entity_id","")),"state":e.get("state",""),"unit":e.get("attributes",{}).get("unit_of_measurement",""),"device_class":e.get("attributes",{}).get("device_class",""),"source_at":e.get("last_reported") or e.get("last_updated")} for e in items if isinstance(e,dict)]
+def heat_source(d):
+    return (_as_v2(d).get("building") or {}).get("heat_source") or {}
 def wanted(d):
-    return model.entities_of(_as_v2(d))
+    return model.entities_of(_as_v2(d))|set(devices.entities(heat_source(d)))
 def utcnow():
     return datetime.now(timezone.utc)
 
@@ -170,7 +172,7 @@ def age_seconds(timestamp,now=None):
     except (AttributeError,TypeError,ValueError):return None
 
 def temperature_ids(d):
-    return model.temperature_entities_of(_as_v2(d))
+    return model.temperature_entities_of(_as_v2(d))|devices.temperature_entities(heat_source(d))
 
 def quality(e,is_temperature,now):
     value=e.get("state","unavailable")
@@ -214,11 +216,19 @@ def sample():
         if not desired:
             with connect() as c:c.execute("INSERT INTO acquisition(id,last_attempt,connected,error) VALUES(1,?,NULL,'not_configured') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,connected=NULL,error='not_configured'",(at,))
             return
-        try:state={x["entity_id"]:x for x in get_entities()}
+        source=heat_source(d)
+        rest_only=source.get("source")=="emsesp_rest" and desired<=set(devices.entities(source))
+        try:state={} if rest_only else {x["entity_id"]:x for x in get_entities()}
         except Exception:
             with connect() as c:c.execute("INSERT INTO acquisition(id,last_attempt,connected,error) VALUES(1,?,0,'ha_unavailable') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,connected=0,error='ha_unavailable'",(at,))
             logging.warning("HA-Abfrage fehlgeschlagen (ha_unavailable)")
             return
+        if source.get("source")=="emsesp_rest" and devices.profile(source.get("profile")):
+            # AB-015: read-only GET on the local EMS-ESP; a failure only affects these fields.
+            rest,errors=devices.read_rest(source,at)
+            state.update(rest)
+            HEAT_SOURCE_STATUS.update(at=at,errors=errors)
+            if errors:logging.warning("EMS-ESP-Abfrage unvollständig: %s",errors)
         temps=temperature_ids(d)
         vals=[]
         for entity in desired:
@@ -245,6 +255,47 @@ def latest_observations(now=None):
         item["valid"]=bool(item["valid"] and item["quality"]=="ok" and not item["stale"])
         observations.append(item)
     return observations
+
+HEAT_SOURCE_STATUS={"at":None,"errors":{}}
+
+def heat_source_snapshot(now=None):
+    """AB-015: latest heat-source values next to the room temperatures (read-only)."""
+    cfg=load_v2();source=heat_source(cfg);fields=devices.entities(source)
+    obs={o["entity_id"]:o for o in latest_observations(now)}
+    def value(o):
+        if not o:return None
+        return o["normalized_value"] if o.get("normalized_value") is not None else o["state"]
+    rooms=[]
+    for r in cfg["rooms"]:
+        temps=[obs.get(e) for e in r.get("temperature_sensors",[])]
+        valid=[o["normalized_value"] for o in temps if o and o["valid"] and o.get("normalized_value") is not None]
+        windows=[obs.get(e) for e in r.get("window_sensors",[])]
+        rooms.append({"id":r["id"],"name":r["name"],"target":r.get("target"),
+            "temperature":round(sum(valid)/len(valid),2) if valid else None,"sensors":len(r.get("temperature_sensors",[])),
+            "window_open":any(o and o["state"]=="on" for o in windows),"monitored":bool(valid)})
+    items=[]
+    for sid,f in fields.items():
+        o=obs.get(sid)
+        items.append({"key":f["key"],"label":f["label"],"kind":f["kind"],"unit":f["unit"],"entity_id":sid,
+            "value":value(o) if o and o["state"] not in ("unavailable","unknown") else None,"valid":bool(o and o["valid"]),"at":o["at"] if o else None})
+    prof=devices.profile(source.get("profile"))
+    return {"profile":prof["key"] if prof else None,"profile_label":prof["label"] if prof else None,
+        "source":source.get("source"),"source_errors":HEAT_SOURCE_STATUS["errors"] if source.get("source")=="emsesp_rest" else {},
+        "fields":items,"rooms":rooms,"read_only":True}
+
+def export_csv(hours=168,now=None):
+    import csv,io
+    now=now or utcnow();start=(now-timedelta(hours=hours)).isoformat()
+    cfg=load_v2();desired=wanted(cfg);labels={sid:f["label"] for sid,f in devices.entities(heat_source(cfg)).items()}
+    for r in cfg["rooms"]:
+        for e in r.get("temperature_sensors",[]):labels[e]="Raum "+r["name"]+" Temperatur"
+        for e in r.get("window_sensors",[]):labels[e]="Raum "+r["name"]+" Fenster"
+    buf=io.StringIO();w=csv.writer(buf,delimiter=";")
+    w.writerow(["zeit_utc","entity_id","bezeichnung","zustand","wert_normiert","einheit","qualitaet"])
+    with connect() as c:
+        for at,eid,st,unit,q,nv,nu in c.execute("SELECT at,entity_id,state,unit,quality,normalized_value,normalized_unit FROM samples WHERE at>=? ORDER BY at,entity_id",(start,)):
+            if eid in desired:w.writerow([at,eid,labels.get(eid,""),st,"" if nv is None else nv,nu or unit or "",q or "unchecked"])
+    return buf.getvalue()
 
 def log_event(kind,detail=None):
     with connect() as c:c.execute("INSERT INTO app_events(at,kind,detail) VALUES(?,?,?)",(utcnow().isoformat(),kind,detail))
@@ -329,6 +380,18 @@ class API(BaseHTTPRequestHandler):
             result["calculation_blockers"]=model.calculation_blockers(cfg)  # AB-008 format, kept for compatibility
             return self.send_json(200,result)
         if path=="/api/v2/catalog":return self.send_json(200,{"valves":model.VALVE_CATALOG})
+        if path=="/api/v2/heat-source/profiles":
+            return self.send_json(200,{"sources":devices.SOURCES,"write_enabled":devices.WRITE_ENABLED,
+                "profiles":[{"key":p["key"],"label":p["label"],"verified":p["verified"],"fields":len(p["fields"])} for p in devices.PROFILES.values()]})
+        if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
+        if path=="/api/v2/export.csv":
+            body=("\ufeff"+export_csv()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type","text/csv; charset=utf-8")
+            self.send_header("Content-Disposition","attachment; filename=autobalance-messwerte.csv")
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         if path=="/api/entities":
             try:return self.send_json(200,{"connected":True,"entities":get_entities()})
             except Exception:return self.send_json(503,{"connected":False,"entities":[],"error":"Home Assistant derzeit nicht erreichbar"})
@@ -340,12 +403,20 @@ class API(BaseHTTPRequestHandler):
         return self.send_json(404,{"error":"Nicht gefunden"})
     def do_POST(self):
         path=urlsplit(self.path).path
-        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion"):return self.send_json(404,{"error":"Nicht gefunden"})
+        if path not in ("/api/config","/api/v2/config","/api/v2/load-share-suggestion","/api/v2/heat-source/test"):return self.send_json(404,{"error":"Nicht gefunden"})
         limit=100000 if path=="/api/config" else 500000
         try:
             size=int(self.headers.get("Content-Length","0"))
             if not 1<=size<=limit:return self.send_json(413,{"error":"Ungültige Datenlänge"})
             data=json.loads(self.rfile.read(size))
+            if path=="/api/v2/heat-source/test":
+                # Read-only probe of the unsaved selection; stores nothing, sends nothing to the device.
+                if not isinstance(data,dict):raise ValueError("Datenquelle fehlt")
+                ha={}
+                if (data.get("source") or "ha")=="ha":
+                    try:ha={x["entity_id"]:x for x in get_entities()}
+                    except Exception:return self.send_json(503,{"error":"Home Assistant derzeit nicht erreichbar"})
+                return self.send_json(200,devices.probe(data,ha,utcnow().isoformat()))
             if path=="/api/v2/load-share-suggestion":
                 # Works on the unsaved editor state; validates structure but stores nothing.
                 if not isinstance(data,dict) or not isinstance(data.get("room_id"),str):raise ValueError("room_id fehlt")
