@@ -25,8 +25,9 @@ OPTIONS_FILE = Path(os.environ.get("AUTO_BALANCE_OPTIONS", "/data/options.json")
 def mobile_kit(path=None):
     """App option ``messkoffer``: the device is the mobile Jodeit measuring kit that moves between customers.
 
-    Only then is the customer configuration itself neutralised after the retention period. Default off,
-    so a stationary installation (e.g. a private Home Assistant) never loses its room configuration."""
+    Only then are jobs deleted automatically 30 days after their end and the customer configuration neutralised
+    (decision Bastian, 27.11.2026). Default off: a stationary installation (e.g. a private Home Assistant) keeps its
+    jobs and configuration; manual deletion and "prepare for next customer" work everywhere."""
     try:
         return json.loads(Path(path or OPTIONS_FILE).read_text()).get("messkoffer") is True
     except (OSError, ValueError, AttributeError):
@@ -34,16 +35,14 @@ def mobile_kit(path=None):
 
 
 def config_expired(last_change, jobs_left, expired_job_ends, now):
-    """Mobile kit: does the stored customer configuration belong only to expired data?
+    """Mobile kit: does the stored customer configuration belong only to expired jobs?
 
-    True if no job (running or stopped) is left and the configuration was last changed either before the end
-    of a job whose deadline has passed or more than RETENTION_DAYS ago. ``last_change`` None (no timestamp
-    anywhere) counts as expired because no remaining job can depend on it."""
-    if jobs_left:
+    True if no job (running or stopped) is left and the configuration was last changed no later than the end
+    of a job whose deadline has passed. A configuration without any expired job is never removed (no idle
+    deadline, review 9). ``now`` is kept for callers and future rules."""
+    if jobs_left or last_change is None:
         return False
-    if last_change is None:
-        return True
-    return last_change + timedelta(days=RETENTION_DAYS) <= now or any(last_change <= end for end in expired_job_ends)
+    return any(last_change <= end for end in expired_job_ends)
 
 
 REGISTER_DIR = Path(os.environ.get("AUTO_BALANCE_REGISTER_DIR", "/share/autobalance"))

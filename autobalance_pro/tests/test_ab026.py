@@ -28,6 +28,14 @@ class Retention(Base):
         self.reg = tempfile.TemporaryDirectory()
         self.reg_patch = patch.object(retention, "REGISTER_DIR", Path(self.reg.name) / "autobalance")
         self.reg_patch.start()
+        self.kit()          # automatic deadlines apply to the mobile measuring kit only (Bastian 27.11.2026)
+
+    def kit(self, on=True):
+        opts = Path(self.reg.name) / "options.json"
+        opts.write_text(json.dumps({"messkoffer": on}))
+        patcher = patch.object(retention, "OPTIONS_FILE", opts)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.reg_patch.stop()
@@ -261,13 +269,6 @@ class DeletionTests(Retention):
 class MobileKitConfigTests(Retention):
     """Review 8, P0: customer configuration must not survive the deadline on the mobile measuring kit."""
 
-    def kit(self, on=True):
-        opts = Path(self.reg.name) / "options.json"
-        opts.write_text(json.dumps({"messkoffer": on}))
-        patcher = patch.object(retention, "OPTIONS_FILE", opts)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     def raw(self, path=None):
         path = Path(path or server.DB)
         wal = Path(str(path) + "-wal")
@@ -321,13 +322,12 @@ class MobileKitConfigTests(Retention):
         self.assertNotIn(b"sensor.beta_kunde", self.raw())
         self.assertNotIn(b"sensor.beta_kunde", self.raw(bak))
 
-    def test_config_without_any_job_expires_after_30_days(self):
+    def test_review9_7_prepared_config_without_job_is_kept(self):
         self.kit()
         with self.at(END):
             server.save_v2(customer("Raum", "sensor.gamma_kunde"))
-        self.assertFalse(server.purge(END + timedelta(days=29))["config_neutralized"])
-        self.assertTrue(server.purge(END + timedelta(days=30, minutes=1))["config_neutralized"])
-        self.assertNotIn(b"sensor.gamma_kunde", self.raw())
+        self.assertFalse(server.purge(END + timedelta(days=90))["config_neutralized"])   # no idle deadline
+        self.assertEqual(server.load_v2()["rooms"][0]["temperature_sensors"], ["sensor.gamma_kunde"])
 
     def test_running_job_blocks_neutralization(self):
         self.kit()
@@ -335,14 +335,25 @@ class MobileKitConfigTests(Retention):
         self.assertFalse(server.purge(END)["config_neutralized"])
         self.assertNotEqual(server.load_v2()["rooms"], [])
 
-    def test_stationary_installation_keeps_its_configuration(self):
+    def test_review9_4_stationary_installation_deletes_nothing_automatically(self):
         self.kit(False)                                          # default: not a measuring kit
         a = self.stopped("Auftrag A", END - timedelta(days=2), END, sensor="sensor.alpha_kunde")
+        self.put([(END - timedelta(days=60), "sensor.alpha_kunde", 20.0)])        # old loose sample
+        bak = self.backup("autobalance-a.db")
         r = server.purge(END + timedelta(days=31))
-        self.assertIsNone(server.get_session(a["id"]))           # the job itself is still deleted
-        self.assertFalse(r["config_neutralized"])
+        self.assertEqual((r["jobs"], r["loose_samples"], r["config_neutralized"]), ([], 0, False))
+        self.assertIsNotNone(server.get_session(a["id"]))
+        self.assertIsNone(server.get_session(a["id"])["deletion_notice"])
+        self.assertFalse(server.get_session(a["id"])["auto_delete"])
         self.assertEqual(server.load_v2()["rooms"][0]["temperature_sensors"], ["sensor.alpha_kunde"])
+        with sqlite3.connect(str(bak)) as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM samples WHERE session_id IS NULL").fetchone()[0], 1)
         self.assertFalse(server.retention_state()["mobile_kit"])
+        server.delete_session(a["id"], "manuell", END + timedelta(days=32))      # manual deletion still works everywhere
+        self.assertIsNone(server.get_session(a["id"]))
+        with sqlite3.connect(str(bak)) as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
 
 
 class ResetTests(Retention):

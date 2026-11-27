@@ -961,8 +961,8 @@ async function renderSessions(){
   const h=document.createElement('h3');h.textContent='Frühere Messungen';root.append(h);
   const mode=document.createElement('p');mode.className='hint';mode.id='retention-mode';
   mode.textContent=sessionsData.retention?.mobile_kit
-    ?'Messkoffer-Modus: Nach Ablauf der letzten Frist werden auch Räume, Fühlerzuordnung und Anlagenangaben vom Gerät entfernt.'
-    :'Stationärer Betrieb: Messungen werden nach 30 Tagen gelöscht, die Konfiguration bleibt erhalten. Vor einem Kundenwechsel „Messgerät für nächsten Kunden vorbereiten“ verwenden.';
+    ?'Messkoffer-Modus: Messungen werden 30 Tage nach Messende gelöscht; danach auch Räume, Fühlerzuordnung und Anlagenangaben, sofern keine weitere Messung vorhanden ist.'
+    :'Stationärer Betrieb: Messungen und Konfiguration bleiben erhalten, es wird nichts automatisch gelöscht. Vor einem Kundenwechsel „Messgerät für nächsten Kunden vorbereiten“ verwenden.';
   root.append(mode);
   const list=document.createElement('div');list.id='session-history';
   if(!done.length){const p=document.createElement('p');p.className='hint';p.textContent='Noch keine abgeschlossene Messung.';list.append(p)}
@@ -971,12 +971,13 @@ async function renderSessions(){
     const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.finalized?' · Bericht festgeschrieben':'')+(s.note?' · '+s.note:'');
     const due=document.createElement('div');due.className='job-due';
     const dueText=document.createElement('p');dueText.className='hint';
-    dueText.textContent='Messdaten auf diesem Gerät werden am '+dateText(s.delete_due_at)+' gelöscht (30 Tage nach Messende). HA-Sicherungen separat berücksichtigen.';
+    dueText.textContent=s.auto_delete?'Messdaten auf diesem Gerät werden am '+dateText(s.delete_due_at)+' gelöscht (30 Tage nach Messende). HA-Sicherungen separat berücksichtigen.'
+      :'Stationärer Betrieb: keine automatische Löschung. Löschen nur manuell.';
     due.append(dueText,badge(s.archived_at?'Ablage durch Techniker bestätigt am '+dateText(s.archived_at):'Ablage in Kundenakte noch nicht bestätigt',s.archived_at?'good':'warn'));
     if(s.deletion_notice)due.append(document.createTextNode(' '),badge(daysLeftText(s.delete_due_at),s.archived_at?'':'warn'));
     const actions=document.createElement('div');actions.className='actions';
     if(!s.archived_at){const ar=document.createElement('button');ar.type='button';ar.className='job-archive';ar.textContent='Ablage in Kundenakte bestätigen';
-      ar.addEventListener('click',()=>inlineConfirm(row,{id:'archive-confirm',text:'Ich bestätige, dass Bericht und benötigte Messdaten in der Jodeit-Kundenakte gesichert wurden. Die Löschung am '+dateText(s.delete_due_at)+' bleibt bestehen.',ok:'Ablage bestätigen',
+      ar.addEventListener('click',()=>inlineConfirm(row,{id:'archive-confirm',text:'Ich bestätige, dass Bericht und benötigte Messdaten in der Jodeit-Kundenakte gesichert wurden.'+(s.auto_delete?' Die Löschung am '+dateText(s.delete_due_at)+' bleibt bestehen.':''),ok:'Ablage bestätigen',
         run:async()=>{await api('v2/sessions/archive','POST',{id:s.id});notice('Ablage bestätigt.');renderSessions();stats()}}));actions.append(ar)}
     const del=document.createElement('button');del.type='button';del.className='danger job-delete';del.textContent='Messung jetzt vom Messgerät löschen …';
     del.addEventListener('click',()=>inlineConfirm(row,{id:'delete-confirm',danger:true,

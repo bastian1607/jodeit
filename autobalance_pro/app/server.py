@@ -365,7 +365,8 @@ SESSION_NAME=re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")  # AB-024: free text (name
 SESSION_COLUMNS="id,name,started_at,ended_at,planned_days,rooms,note,finalized_at,app_version,delete_due_at,archived_at"
 def _session_row(r):
     d=dict(zip(SESSION_COLUMNS.split(","),r));d["rooms"]=json.loads(d["rooms"]);d["finalized"]=bool(d["finalized_at"])
-    d["deletion_notice"]=retention.notice(coverage.parse(d["delete_due_at"]),bool(d["archived_at"]),utcnow()) if d["delete_due_at"] else None
+    d["auto_delete"]=retention.mobile_kit()
+    d["deletion_notice"]=retention.notice(coverage.parse(d["delete_due_at"]),bool(d["archived_at"]),utcnow()) if d["delete_due_at"] and d["auto_delete"] else None
     return d
 
 def list_sessions():
@@ -549,6 +550,7 @@ def sanitize_backup(path,now=None,entities=()):
     schemas without ``session_id`` the job windows from the deletion log are used. Returns counts."""
     now=now or utcnow()
     ids,windows=_deletion_targets(now)
+    kit=retention.mobile_kit()   # Bastian 27.11.: automatic expiry only on the mobile measuring kit
     limit=(now-timedelta(days=retention.LOOSE_DATA_DAYS)).isoformat()
     c=sqlite3.connect(str(path),timeout=10)
     removed={"jobs":0,"samples":0,"config":False}
@@ -558,7 +560,7 @@ def sanitize_backup(path,now=None,entities=()):
         if "sessions" in tables:
             scols={r[1] for r in c.execute("PRAGMA table_info(sessions)")}
             for sid,st,en,due in c.execute("SELECT id,started_at,ended_at,"+("delete_due_at" if "delete_due_at" in scols else "NULL")+" FROM sessions").fetchall():
-                expired=en is not None and (due or retention.due_at(coverage.parse(en)).isoformat())<=now.isoformat()
+                expired=kit and en is not None and (due or retention.due_at(coverage.parse(en)).isoformat())<=now.isoformat()
                 if sid in ids or expired:
                     ids.add(sid)
                     if st and en:windows.append((st,en))
@@ -570,15 +572,16 @@ def sanitize_backup(path,now=None,entities=()):
                 loose="session_id IS NULL AND "
             else:loose=""
             for st,en in windows:removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}at>=? AND at<=?",(st,en)).rowcount
-            removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}at<?",(limit,)).rowcount
+            if kit:removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}at<?",(limit,)).rowcount
             for eid in entities:   # loose samples of the deleted job's sensors (not part of its window)
                 removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}entity_id=?",(eid,)).rowcount
         if "config_history" in tables:
             for st,en in windows:c.execute("DELETE FROM config_history WHERE at>=? AND at<=?",(st,en))
-            newest=c.execute("SELECT MAX(id) FROM config_history").fetchone()[0]
-            c.execute("DELETE FROM config_history WHERE at<? AND id<>?",(limit,newest or -1))
-        if "app_events" in tables:c.execute("DELETE FROM app_events WHERE at<?",(limit,))
-        if retention.mobile_kit():
+            if kit:
+                newest=c.execute("SELECT MAX(id) FROM config_history").fetchone()[0]
+                c.execute("DELETE FROM config_history WHERE at<? AND id<>?",(limit,newest or -1))
+        if kit and "app_events" in tables:c.execute("DELETE FROM app_events WHERE at<?",(limit,))
+        if kit:
             with connect() as live:expired_ends=_expired_job_ends(live)
             for st,en in windows:expired_ends.append(coverage.parse(en))   # jobs removed from this copy
             jobs_left=c.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] if "sessions" in tables else 0
@@ -632,15 +635,19 @@ def delete_session(sid,reason,now=None,compact=True):
     logging.info("Messung %s gelöscht (%s): %s Messwerte, %s App-Sicherungen bereinigt",sid,reason,n,cleaned)
     return {"session_ref":sid,"deleted_at":now.isoformat(),"reason":reason,"samples_deleted":n,"backups_cleaned":cleaned,"register":register}
 
+class _Skip(Exception):
+    pass
+
 def purge(now=None):
     """Delete jobs past their deadline and loose data older than 30 days; clean local app backups.
     Safe to run any time; catches up missed deadlines after downtime (AC-026-05). Errors are kept
     as a persistent status until a later run succeeds (retried hourly)."""
     now=now or utcnow()
     done=[];errors=[]
+    kit=retention.mobile_kit()   # Bastian 27.11.: automatic deletion only on the mobile measuring kit
     with LOCK:
         with connect() as c:
-            due=[r[0] for r in c.execute("SELECT id FROM sessions WHERE ended_at IS NOT NULL AND delete_due_at<=?",(now.isoformat(),))]
+            due=[r[0] for r in c.execute("SELECT id FROM sessions WHERE ended_at IS NOT NULL AND delete_due_at<=?",(now.isoformat(),))] if kit else []
         for sid in due:
             try:done.append(delete_session(sid,"frist",now,compact=False))
             except Exception:
@@ -649,6 +656,7 @@ def purge(now=None):
         limit=(now-timedelta(days=retention.LOOSE_DATA_DAYS)).isoformat()
         loose=0
         try:
+            if not kit:raise _Skip()
             with connect() as c:
                 loose=c.execute("DELETE FROM samples WHERE session_id IS NULL AND at<?",(limit,)).rowcount
                 newest=c.execute("SELECT MAX(id) FROM config_history").fetchone()[0]
@@ -656,6 +664,7 @@ def purge(now=None):
                 keep_from=min(limit,active) if active else limit   # a running job still needs its change history
                 c.execute("DELETE FROM config_history WHERE at<? AND id<>?",(keep_from,newest or -1))
                 c.execute("DELETE FROM app_events WHERE at<?",(limit,))
+        except _Skip:pass
         except Exception:
             logging.exception("Bereinigung loser Daten fehlgeschlagen")
             errors.append({"code":"loose","text":"Messwerte außerhalb von Messungen konnten nicht bereinigt werden.","at":now.isoformat()})

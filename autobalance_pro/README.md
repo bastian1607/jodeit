@@ -24,11 +24,14 @@
 - Jede Messung hat eine eigene ID. Messwerte, die während einer Messung erfasst werden, tragen diese ID.
   Auswertung, Bericht und CSV einer Messung lesen nur diese Werte. Beim Start wird die Konfiguration samt
   Geräteprofil gespeichert, beim Stoppen werden Auswertung und Bericht unverändert festgeschrieben.
-- **Automatische Löschung 30 Kalendertage nach Messende** (interne Jodeit-Regel, keine gesetzliche Frist):
-  Messwerte, Konfigurations-Snapshots, Bericht, Bezeichnung und Notiz. Die Frist wird durch Export, Bericht oder
-  Neustart nicht verlängert. Laufende Messungen werden nie automatisch gelöscht. Hinweise 7 Tage vorher (wenn
-  nicht archiviert) und am letzten Tag. Verpasste Fristen werden beim nächsten Start nachgeholt.
-- Messwerte außerhalb von Messungen, Konfigurationsverlauf und App-Ereignisse werden nach 30 Tagen gelöscht.
+- **Automatische Löschung nur im Messkoffer-Modus** (App-Option `messkoffer`, Standard `false`; Entscheidung
+  Bastian 27.11.2026): Messwerte, Konfigurations-Snapshots, Bericht, Bezeichnung und Notiz einer Messung
+  30 Kalendertage nach Messende (interne Jodeit-Regel, keine gesetzliche Frist). Die Frist wird durch Export,
+  Bericht oder Neustart nicht verlängert. Laufende Messungen werden nie automatisch gelöscht. Hinweise 7 Tage
+  vorher (ohne bestätigte Ablage) und am letzten Tag. Verpasste Fristen werden beim nächsten Start nachgeholt.
+  Messwerte außerhalb von Messungen, Konfigurationsverlauf und App-Ereignisse werden dort nach 30 Tagen gelöscht.
+- **Stationärer Betrieb (Standard):** keine automatische Löschung. Manuelles Löschen, „Messgerät für nächsten
+  Kunden vorbereiten“ und das Löschregister gelten trotzdem.
 - „Messung jetzt vom Messgerät löschen …“ (Bezeichnung eingeben) und „Messgerät für nächsten Kunden vorbereiten …“
   in Schritt 5, jeweils als Formular im Seiteninhalt mit „Vorgang abbrechen“. Das Vorbereiten löscht immer alle
   Messungen; Messungen ohne bestätigte Ablage in der Kundenakte nur nach ausdrücklicher Bestätigung (sonst
@@ -43,11 +46,10 @@
   Löschprotokoll neu aufgebaut; ist `/share` nicht beschreibbar, zeigt die Übersicht einen Hinweis.
 - Fehler eines Löschlaufs bleiben in der Übersicht sichtbar (`GET api/v2/retention` → `status`), bis ein späterer
   Lauf erfolgreich war. Neuer Versuch stündlich.
-- **Messkoffer-Modus** (App-Option `messkoffer`, Standard `false`): Ist keine Messung mehr vorhanden und gehört die
-  Konfiguration nur zu abgelaufenen Messungen (oder ist sie seit 30 Tagen unverändert), werden Räume,
-  Fühlerzuordnung, Anlagenangaben, Konfigurationsverlauf und Messwerte außerhalb von Messungen automatisch entfernt,
-  ebenso in den lokalen App-Sicherungen. Eine laufende oder noch nicht abgelaufene Messung verhindert das.
-  Stationäre Installationen behalten ihre Konfiguration; dort ist „Messgerät für nächsten Kunden vorbereiten“ der Weg.
+- **Konfiguration im Messkoffer-Modus:** Ist keine Messung mehr vorhanden und wurde die Konfiguration zuletzt
+  vor dem Ende einer per Frist gelöschten Messung geändert, werden Räume, Fühlerzuordnung, Anlagenangaben,
+  Konfigurationsverlauf und Messwerte außerhalb von Messungen entfernt, ebenso in den lokalen App-Sicherungen.
+  Eine vorbereitete Konfiguration ohne abgelaufene Messung bleibt erhalten (keine Leerlauf-Frist).
 - Beim Löschen einer Messung werden auch Messwerte außerhalb von Messungen von deren Fühlern entfernt, sofern die
   aktuelle Konfiguration sie nicht mehr verwendet.
 - **Grenzen:** Home-Assistant-Sicherungen (vollständig oder App) enthalten den Datenstand zum Sicherungszeitpunkt;

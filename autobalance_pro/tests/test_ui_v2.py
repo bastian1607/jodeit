@@ -779,6 +779,14 @@ class MobileTests(V2Browser):
         from datetime import timedelta
         now = datetime.now(timezone.utc)
         self.seed(rooms=("Wohnzimmer",))
+        self.page.goto(self.url)     # first: stationary default -> no deadline, no notice
+        import retention
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"messkoffer": True}, f)
+        self.addCleanup(os.unlink, f.name)
+        kit = patch.object(retention, "OPTIONS_FILE", Path(f.name))
+        kit.start()
+        self.addCleanup(kit.stop)
         jobs = []
         for name, days in (("J-2026-123 Müller", 25), ("J-2026-124 Schulze", 3)):
             with patch.object(server, "utcnow", return_value=now - timedelta(days=days + 1)):
@@ -796,7 +804,7 @@ class MobileTests(V2Browser):
         row = self.page.locator("#session-history .job-row", has_text="Müller")
         expect(row).to_contain_text("(30 Tage nach Messende). HA-Sicherungen separat berücksichtigen.")
         expect(row).to_contain_text("Ablage in Kundenakte noch nicht bestätigt")
-        expect(self.page.locator("#retention-mode")).to_contain_text("Stationärer Betrieb")
+        expect(self.page.locator("#retention-mode")).to_contain_text("Messkoffer-Modus")
         row.locator(".job-archive").click()
         expect(row.locator("#archive-confirm")).to_contain_text("in der Jodeit-Kundenakte gesichert wurden. Die Löschung am")
         row.locator("#archive-confirm .confirm-ok").click()
@@ -839,6 +847,21 @@ class MobileTests(V2Browser):
         self.assertEqual(self.v2()["rooms"], [])
         self.assertIsNone(server.get_session(jobs[1]["id"]))
         self.assertEqual(dialogs, [])
+
+    def test_ab026_stationary_shows_no_deadline(self):
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        self.seed(rooms=("Wohnzimmer",))
+        with patch.object(server, "utcnow", return_value=now - timedelta(days=26)):
+            job = server.start_session({"name": "J-2026-125", "confirmed": True})
+        with patch.object(server, "utcnow", return_value=now - timedelta(days=25)):
+            server.stop_session(job["id"])
+        self.open()
+        expect(self.page.locator(".retention-notice")).to_have_count(0)
+        self.tab("5 Prüfen & Messung")
+        row = self.page.locator("#session-history .job-row")
+        expect(row).to_contain_text("Stationärer Betrieb: keine automatische Löschung")
+        expect(self.page.locator("#retention-mode")).to_contain_text("es wird nichts automatisch gelöscht")
 
     def test_ab026_purge_error_banner(self):
         self.seed(rooms=("Wohnzimmer",))
