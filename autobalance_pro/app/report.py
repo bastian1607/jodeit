@@ -10,7 +10,7 @@ from html import escape
 import assessment
 from coverage import parse
 
-STAGE_CLASS = {"no_data": "bad", "insufficient": "bad", "level": "warn", "level_and_slope": "good"}
+STAGE_CLASS = {"no_data": "bad", "insufficient": "bad", "unverified": "warn", "level": "warn", "level_and_slope": "good"}
 DIST_TEXT = {"dhw": "Warmwasser", "defrost": "Abtauung", "heating_off": "kein Heizbetrieb",
              "change": "Parameter-/Sollwertänderung", "window": "Fenster offen"}
 
@@ -39,7 +39,7 @@ def _table(headers, rows):
     return f"<table><thead><tr>{head}</tr></thead><tbody>{body or '<tr><td colspan=' + str(len(headers)) + '>–</td></tr>'}</tbody></table>"
 
 
-def render(session, result, gaps, events, params, labels, tz, tz_name, version, now):
+def render(session, result, gaps, events, params, labels, tz, tz_name, version, now, frozen_at=None):
     """Return the complete HTML document.
 
     session: stored measuring job. result: assessment.assess(...) incl. "texts".
@@ -60,7 +60,8 @@ table{{border-collapse:collapse;width:100%;margin:6px 0}}th,td{{border:1px solid
 .hint{{color:#5a6b76;font-size:12.5px}}ul{{margin:6px 0 6px 18px;padding:0}}@media print{{body{{margin:0}}.noprint{{display:none}}}}</style></head><body>
 <p class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></p>
 <h1>Jodeit AutoBalance Pro · Messbericht</h1>
-<p class="hint">Erstellt {e(_t(now, tz))} · App-Version {e(version)} · Zeitzone {e(tz_name)} · Nur Messung, keine Steuerbefehle</p>
+<p class="hint">Erstellt {e(_t(frozen_at or now, tz))} · App-Version {e(version)} · Zeitzone {e(tz_name)} · Nur Messung, keine Steuerbefehle</p>
+<p class="hint" id="report-state">{e("Bericht bei Messende erstellt und unverändert gespeichert. Enthält nur Daten dieser Messung." if frozen_at else "Vorläufiger Bericht einer laufenden Messung. Er wird beim Stoppen mit dem Endstand festgeschrieben.")}</p>
 <h2>Messung</h2>
 {_table(["Bezeichnung", "Beginn", "Ende", "Dauer", "Geplant", "Status"],
         [[e(session['name']), _t(session['started_at'], tz), _t(session['ended_at'], tz) if session.get('ended_at') else "–",

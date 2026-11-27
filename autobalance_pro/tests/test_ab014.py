@@ -219,6 +219,22 @@ class AssessmentTests(unittest.TestCase):
         empty.ticks = []
         self.assertEqual(empty.run()["stage"], "no_data")
 
+    def test_ac6_02_without_heating_signal_no_level_statement(self):
+        roles = dict(ROLES, heating_active=None, hp_activity=None)
+        r = Plant().run(roles=roles)
+        self.assertEqual(r["stage"], "unverified")
+        self.assertIn("kein Betriebsstatus der Wärmepumpe", " ".join(assessment.report_text(r)))
+        roles = dict(ROLES, hp_activity=None, dhw=None)       # heating known, disturbances not checked
+        r = Plant(outdoor=lambda t: 2.0).run(roles=roles)
+        self.assertEqual(r["stage"], "level")
+        self.assertIn("Störungsfreiheit (Warmwasser/Abtauung) nicht belegt", r["stage_text"])
+
+    def test_ac6_03_slope_examples(self):
+        ok = Plant(outdoor=by_night({1: -6, 2: -5, 3: 3, 4: 4, 5: 4, 6: 4, 7: 4})).run()
+        self.assertEqual(ok["stage"], "level_and_slope")
+        no = Plant(outdoor=by_night({1: -6, 2: -5, 3: 2, 4: 4, 5: 2, 6: 2, 7: 2})).run()
+        self.assertEqual(no["stage"], "level")
+
     def test_running_job_is_provisional(self):
         p = Plant(days=4)
         r = assessment.assess(p.start, p.end, p.ticks, p.values, p.history, ROLES, TZ, planned_days=7)
@@ -250,14 +266,16 @@ class ServerTests(unittest.TestCase):
                 row = p.values[t]
                 for eid in ("sensor.out", "sensor.vl", "sensor.wz", "binary_sensor.f_wz"):
                     x = row[eid]
-                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value) VALUES(?,?,?,?,?,?,?)",
-                              (t.isoformat(), eid, x["s"], "", 1, "ok", x["v"]))
+                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value,session_id) VALUES(?,?,?,?,?,?,?,?)",
+                              (t.isoformat(), eid, x["s"], "", 1, "ok", x["v"], s["id"]))
         with patch("urllib.request.urlopen", side_effect=AssertionError("no network")):
             r = server.session_assessment(s["id"], now=p.end)
         self.assertEqual(r["roles"]["outdoor"], "sensor.out")
         self.assertIsNone(r["roles"]["outdoor_damped"])
         self.assertEqual(r["valid_nights"], 4)
-        self.assertEqual(r["stage"], "level")
+        # AC6-02: HA assignment without heating-mode signal -> descriptive only, no level statement
+        self.assertEqual(r["stage"], "unverified")
+        self.assertIn("Heizbetrieb nicht bestätigt", r["stage_text"])
         self.assertTrue(r["read_only"])
         self.assertIsNone(server.session_assessment("ma_unknown"))
 

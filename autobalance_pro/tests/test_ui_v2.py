@@ -609,18 +609,18 @@ class AcceptanceTests(V2Browser):
             cfg["circuits"][0]["entities"]["flow"] = "sensor.vl"
             self.put_v2(cfg)
         with patch.object(server, "utcnow", return_value=start):
-            server.start_session({"name": "Pilot Anlage 1", "confirmed": True})
+            job = server.start_session({"name": "Pilot Anlage 1", "confirmed": True})
         with sqlite3.connect(server.DB) as c:
             t = start
             while t < datetime.now(timezone.utc):
                 for eid, v in (("sensor.aussen", 2.0), ("sensor.vl", 40.0), ("sensor.wohnzimmer_t", 20.7)):
-                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value) VALUES(?,?,?,?,?,?,?)",
-                              (t.isoformat(), eid, str(v), "°C", 1, "ok", v))
+                    c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality,normalized_value,session_id) VALUES(?,?,?,?,?,?,?,?)",
+                              (t.isoformat(), eid, str(v), "°C", 1, "ok", v, job["id"]))
                 t += timedelta(minutes=5)
         self.open()
         self.tab("5 Prüfen & Messung")
         stage = self.page.locator("#assessment-stage")
-        expect(stage).to_contain_text("Niveau im Messbereich prüfbar")
+        expect(stage).to_contain_text("Heizbetrieb nicht bestätigt")     # HA-only config (AC6-02)
         expect(stage).to_contain_text("vorläufig")
         expect(self.page.locator("#assessment-basis")).to_contain_text("Abtauung nicht erkennbar")
         expect(self.page.locator("#assessment-nights")).to_contain_text("geeignet")
@@ -633,7 +633,7 @@ class AcceptanceTests(V2Browser):
         with self.page.expect_popup() as popup:
             self.page.click("#report-link")
         report = popup.value
-        expect(report.locator("#report-result")).to_contain_text("Niveau im Messbereich prüfbar")
+        expect(report.locator("#report-result")).to_contain_text("Heizbetrieb nicht bestätigt")
         expect(report.locator("body")).to_contain_text("Nicht überwachte Räume: Bad")
         if os.environ.get("AUTO_BALANCE_SCREENSHOTS"):
             report.screenshot(path=str(Path(os.environ["AUTO_BALANCE_SCREENSHOTS"]) / "ab020-messbericht.png"), full_page=True)

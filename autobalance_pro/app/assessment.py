@@ -40,6 +40,7 @@ SLOT = timedelta(minutes=THRESHOLDS["slot_minutes"])
 STAGE_TEXT = {
     "no_data": "Keine Messdaten in dieser Messung",
     "insufficient": "Messung unzureichend – keine Heizkurvenempfehlung",
+    "unverified": "Heizbetrieb nicht bestätigt – nur beschreibende Messdaten",
     "level": "Niveau im Messbereich prüfbar – Steigung nicht beurteilbar",
     "level_and_slope": "Niveau und Steigung in den Messbereichen prüfbar (nur Technikerprüfung)",
 }
@@ -344,6 +345,13 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
                 stage = "level_and_slope"
         if outages:
             reasons.append(f"{len(outages)} Messausfall/-ausfälle über {th['long_outage_hours']} h – gesondert prüfen.")
+    # AC6-02 (ChatGPT review, AB-025): without a heating-mode signal no night can be shown as a
+    # verified heating operating point; the data stay descriptive.
+    if stage in ("level", "level_and_slope") and not roles.get("heating_active") and not roles.get("hp_activity"):
+        stage = "unverified"
+        reasons.insert(0, "Kein Betriebsstatus der Wärmepumpe zugeordnet – Heizbetrieb nicht bestätigt. "
+                          "Geräteprofil oder Heizbetriebs-Entität zuordnen.")
+    disturbance_checked = bool(roles.get("hp_activity")) or bool(roles.get("dhw"))
     if not out["window"]["complete"] and stage != "no_data":
         reasons.append("Messung läuft noch – Ergebnis vorläufig.")
 
@@ -353,7 +361,10 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
     raw_diffs = [n["outdoor_raw_median"] - n["outdoor_median"] for n in nights
                  if n["outdoor_raw_median"] is not None and n["outdoor_median"] is not None and roles.get("outdoor_damped")]
     out.update({
-        "stage": stage, "stage_text": STAGE_TEXT[stage], "reasons": reasons,
+        "stage": stage, "reasons": reasons,
+        "stage_text": STAGE_TEXT[stage] + ("" if disturbance_checked or stage in ("no_data", "insufficient")
+                                           else " · Störungsfreiheit (Warmwasser/Abtauung) nicht belegt"),
+        "disturbances_verified": disturbance_checked,
         "nights": nights, "valid_nights": len(current), "valid_hours": round(sum(n["ok_hours"] for n in current), 1),
         "outdoor_band": {"min": sorted_band[0] if band else None, "max": sorted_band[-1] if band else None,
                          "span_k": round(sorted_band[-1] - sorted_band[0], 1) if band else None,
@@ -378,6 +389,10 @@ def report_text(result, fmt=lambda iso: iso):
     band = result["outdoor_band"]
     outdoor = "regelungsrelevante (gedämpfte) Außentemperatur" if band["damped"] else "ungedämpfte Außentemperatur"
     texts = []
+    if result["stage"] == "unverified":
+        texts.append("Für die Messung war kein Betriebsstatus der Wärmepumpe verfügbar. Die Nächte sind technisch "
+                     "auswertbar, ein bestätigter Heizbetrieb liegt aber nicht vor. Der Bericht enthält nur beschreibende "
+                     "Messdaten und keine Heizkurvenbewertung.")
     if result["stage"] in ("no_data", "insufficient"):
         texts.append(f"Im Messzeitraum waren {result['valid_nights']} geeignete Nächte mit insgesamt "
                      f"{_de(result['valid_hours'])} verwertbaren Stunden vorhanden. "

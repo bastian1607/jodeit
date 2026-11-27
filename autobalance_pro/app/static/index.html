@@ -888,8 +888,8 @@ function jobLinks(s){
   box.append(rep,document.createTextNode(' · '),csv,document.createTextNode(' '),show);return box;
 }
 async function stopMeasurement(a){
-  if(!confirm('Messung „'+a.name+'“ stoppen? Der Bericht bleibt gespeichert und kann später gedruckt werden.'))return false;
-  try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messung gestoppt. Bericht unter „Frühere Messungen“.');return true}catch(ex){notice(ex.message,true);return false}
+  if(!confirm('Messung „'+a.name+'“ stoppen?\n\nDer Bericht wird jetzt mit dem Endstand erstellt und unverändert gespeichert. Er enthält nur die Daten dieser Messung.'))return false;
+  try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messung gestoppt. Bericht festgeschrieben, unter „Frühere Messungen“ abrufbar.');return true}catch(ex){notice(ex.message,true);return false}
 }
 let sessionsRender=0;
 async function renderSessions(){
@@ -915,7 +915,7 @@ async function renderSessions(){
     const form=document.createElement('div');form.className='item';form.id='session-form';
     const monitored=cfg.rooms.filter(r=>r.temperature_sensors.length),others=cfg.rooms.filter(r=>!r.temperature_sensors.length);
     const nl=document.createElement('label');nl.htmlFor='session-name';nl.textContent='Bezeichnung (Freitext, z. B. Name, Auftrag oder Angebot)';
-    const name=document.createElement('input');name.id='session-name';name.maxLength=120;name.placeholder='z. B. Müller · Angebot 2026-123';name.autocomplete='off';
+    const name=document.createElement('input');name.id='session-name';name.maxLength=120;name.placeholder='z. B. J-2026-123 (Kundenname optional)';name.autocomplete='off';
     const tl=document.createElement('label');tl.htmlFor='session-note';tl.textContent='Notiz, optional';
     const note=document.createElement('textarea');note.id='session-note';note.maxLength=1000;note.rows=2;
     const dl=document.createElement('label');dl.htmlFor='session-days';dl.textContent='Geplante Dauer in Tagen';
@@ -945,7 +945,7 @@ async function renderSessions(){
   if(!done.length){const p=document.createElement('p');p.className='hint';p.textContent='Noch keine abgeschlossene Messung.';list.append(p)}
   for(const s of done){const row=document.createElement('div');row.className='item';
     const b=document.createElement('b');b.textContent=s.name;
-    const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.note?' · '+s.note:'');
+    const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.finalized?' · Bericht festgeschrieben':'')+(s.note?' · '+s.note:'');
     row.append(b,p,jobLinks(s));list.append(row)}
   root.append(list);
 }
@@ -969,7 +969,7 @@ async function renderQuickMeasurement(){
   root.append(box);
 }
 /* ---------- AB-014 Aussagekraft des Messauftrags (nur lesend) ---------- */
-const STAGE_KIND={no_data:'warn',insufficient:'bad',level:'warn',level_and_slope:'good'};
+const STAGE_KIND={no_data:'warn',insufficient:'bad',unverified:'warn',level:'warn',level_and_slope:'good'};
 const DIST_TEXT={dhw:'Warmwasser',defrost:'Abtauung',heating_off:'kein Heizbetrieb',change:'Parameter-/Sollwertänderung',window:'Fenster offen'};
 function num1(v){return v===null||v===undefined?'–':Number(v).toLocaleString('de-DE',{maximumFractionDigits:1})}
 let assessmentRender=0;
