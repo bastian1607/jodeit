@@ -19,6 +19,31 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Anlagendaten automatisch übernehmen (AB-029, in Entwicklung)
+
+Ist in Schritt 3 ein Geräteprofil gewählt (z. B. Buderus · BBQKees/EMS-ESP · HMC310 · Heizkreis 1), füllt die App
+alle **leeren** Felder, die das Profil liefert:
+- Entitäten Außentemperatur, Warmwasser, Vorlauf, Vorlauf-Soll, Rücklauf, Heizkreispumpe (nur Quelle Home Assistant)
+- Hersteller; Heizflächenart des zugeordneten Heizkreises (nur eindeutige Reglerwerte `radiator`/`floor`);
+  Heizsystem des Gebäudes nur bei genau einem Heizkreis
+- Heizkurvenparameter laut Regler mit Quelle und Datum der letzten Änderung
+
+Regeln (Review ChatGPT 12):
+- Jeder automatische Wert hat eine gespeicherte Herkunft (Profil, Quelle, Heizkreis, erstmals gelesen, zuletzt
+  geändert). Er folgt dem Regler, solange er unverändert ist; **manuell hinterlegte Werte werden nie überschrieben**.
+- Kreiswerte nur in den Heizkreis, dem das Profil zugeordnet ist („Profil gilt für Heizkreis“; bei einem Kreis
+  automatisch). Ohne eindeutige Zuordnung werden keine Kreiswerte übernommen.
+- Wechsel von Profil, Datenquelle, EMS-ESP-Gateway (IP-Adresse) oder Heizkreis nur mit Bestätigung; dabei werden
+  die automatischen Werte der bisherigen Quelle entfernt und neu übernommen, manuelle bleiben.
+- Ein bereits ausgefülltes Feld ohne gespeicherte Herkunft wird nie still übernommen, auch wenn es dem Anlagenwert
+  entspricht („Herkunft nicht bestätigt · automatische Nachführung aus“). Nur ausdrücklich über
+  „Diese Werte künftig automatisch nachführen …“ (protokolliert als `autofill_adopt`).
+- Die **minimale Außentemperatur des Reglers wird nicht als Norm-Außentemperatur übernommen**; sie steht als
+  Reglerwert neben dem Feld („Norm-Außentemperatur laut Heizlast: noch nicht bestätigt“).
+- Nicht automatisch: Heizkurven-Stützpunkte, Auslegungsvorlauf/-rücklauf, Verdichterstatus, Modell, Nennleistung,
+  Mindestvolumenstrom. Erfassungsstatus wird nur zurückgesetzt, wenn sich gemessene Entitäten ändern.
+- Rein lesend: nichts wird an die Anlage gesendet.
+
 ## Messdaten, Aufbewahrung und Löschung (AB-025, AB-026)
 
 - Jede Messung hat eine eigene ID. Messwerte, die während einer Messung erfasst werden, tragen diese ID.

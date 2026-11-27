@@ -88,7 +88,7 @@ class V2Browser(unittest.TestCase):
         for method, path in self.requests:
             self.assertTrue(path.startswith("/api/") or path in ("/", "/jodeit-logo.png"), path)
             if method == "POST":
-                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop", "/api/v2/sessions/archive", "/api/v2/sessions/delete", "/api/v2/reset"), path)
+                self.assertIn(path, ("/api/v2/config", "/api/v2/heat-source/autofill/adopt", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop", "/api/v2/sessions/archive", "/api/v2/sessions/delete", "/api/v2/reset"), path)
 
     # ------------------------------------------------------------- helpers
     def v2(self):
@@ -764,6 +764,97 @@ class MobileTests(V2Browser):
         self.page.reload()
         self.tab("3 Heizungsanlage & Heizkreise")
         expect(self.page.locator("#hs-detect-box")).to_have_count(0)        # configured -> no proposal
+        # AB-029: everything the profile delivers is taken over automatically into empty fields
+        auto = self.page.locator("#hs-autofill-box")
+        expect(auto.locator(".autofill-auto")).to_contain_text("Automatisch aus der Anlage übernommen")
+        expect(auto.locator(".autofill-auto")).to_contain_text("Heizkreis Vorlauf (Entität)")
+        expect(auto).to_contain_text("Es wird nichts an die Anlage gesendet")
+        expect(self.page.locator("#b-outdoor-controller")).to_contain_text("Norm-Außentemperatur laut Heizlast: noch nicht bestätigt")
+        expect(self.page.locator("#b-outdoor")).to_have_value("")                     # AC29-01
+        cfg = self.v2()
+        self.assertEqual(cfg["circuits"][0]["entities"]["flow"], "sensor.boiler_curflowtemp")
+        self.assertEqual(cfg["building"]["heat_pump"]["manufacturer"], "Buderus")
+        self.assertIn("Heizkurve Auslegungstemperatur", cfg["circuits"][0]["heating_curve"]["manufacturer_params"])
+        expect(self.page.locator("#hp-manufacturer")).to_have_value("Buderus")
+        # a later save from the form keeps the record of auto values (no false "eigene Angaben")
+        self.page.locator("#plant-form").evaluate("f => f.requestSubmit()")
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        self.page.reload()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        expect(auto).to_be_visible()
+        expect(auto).not_to_contain_text("Manuell hinterlegter Wert")
+        expect(auto).not_to_contain_text("Herkunft ungeklärt")
+        self.assertIn("circuit.entities.flow", self.v2()["building"]["heat_source"]["autofilled"])
+        # Review 12, AC29-05/10: a source switch needs consent and removes the automatic values of the old source
+        self.page.select_option("#hs-source", "emsesp_rest")
+        self.page.fill("#hs-host", "192.168.178.69")
+        sw = self.page.locator("#hs-switch-box")
+        expect(sw).to_contain_text("Manuell hinterlegte Werte und Werte ohne bestätigte Herkunft bleiben bestehen")
+        expect(sw).to_contain_text("über Home Assistant, künftig")
+        expect(sw).to_contain_text("über EMS-ESP 192.168.178.69")
+        expect(sw).to_contain_text("automatisch verwaltete Werte")
+        self.page.locator("#plant-form").evaluate("f => f.requestSubmit()")
+        expect(self.page.locator("#notice")).to_contain_text("bestätigen")
+        self.assertEqual(self.v2()["building"]["heat_source"]["source"], "ha")
+        self.page.check("#hs-switch-confirm")
+        self.page.locator("#plant-form").evaluate("f => f.requestSubmit()")
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        cfg = self.v2()
+        self.assertEqual(cfg["building"]["heat_source"]["source"], "emsesp_rest")
+        self.assertEqual(cfg["circuits"][0]["entities"]["flow"], "")
+
+    def test_ab029_existing_value_only_adopted_explicitly(self):
+        """Review 13, AC13-04: equal existing value is not taken over silently; explicit action needed."""
+        import devices
+        cfg = self.seed(rooms=("Wohnzimmer",))
+        for sid, f in devices.entities({"profile": "buderus-emsesp-hmc310", "source": "ha"}).items():
+            self.entities.append(ent(sid, f["label"], "radiator" if f["key"] == "heating_type" else "1", f["unit"], ""))
+        cfg["circuits"][0]["emitter_type"] = "radiators"
+        cfg["building"]["heat_source"] = {"profile": "buderus-emsesp-hmc310", "source": "ha", "emsesp_host": ""}
+        self.put_v2(cfg)
+        server.sample()
+        server.autofill_from_source()
+        self.assertNotIn("circuit.emitter_type", self.v2()["building"]["heat_source"]["autofilled"])
+        self.open()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        box = self.page.locator("#hs-autofill-box")
+        expect(box.locator(".autofill-matches_unconfirmed")).to_contain_text("Herkunft nicht bestätigt · automatische Nachführung aus")
+        expect(box.locator(".autofill-matches_unconfirmed")).to_contain_text("Heizflächenart Heizkreis")
+        # AC14-01: unsaved input is never discarded; no API call
+        self.page.fill("#b-outdoor", "-12")
+        self.page.click("#hs-adopt-existing")
+        expect(self.page.locator("#notice")).to_contain_text("zuerst speichern")
+        expect(self.page.locator("#adopt-confirm")).to_have_count(0)
+        expect(self.page.locator("#b-outdoor")).to_have_value("-12")
+        with server.connect() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM config_history WHERE kind='autofill_adopt'").fetchone()[0], 0)
+        self.page.fill("#b-outdoor-ref", "Heizlastberechnung")
+        self.page.locator("#plant-form button[type=submit]").first.click()        # like the installer: field loses focus first
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        self.assertEqual(self.v2()["building"]["design_outdoor_c"], -12)
+        # AC14-02: device value gone between display and confirmation -> honest message, nothing recorded
+        self.page.click("#hs-adopt-existing")
+        expect(self.page.locator("#adopt-confirm")).to_contain_text("künftig automatisch")
+        for e in self.entities:
+            if e["entity_id"] == "select.thermostat_hc1_heatingtype":
+                e["state"] = "unavailable"
+        server.sample()
+        self.page.locator("#adopt-confirm .confirm-ok").click()
+        expect(self.page.locator("#notice")).to_contain_text("Keine Werte übernommen")
+        self.assertNotIn("circuit.emitter_type", self.v2()["building"]["heat_source"]["autofilled"])
+        with server.connect() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM config_history WHERE kind='autofill_adopt'").fetchone()[0], 0)
+        for e in self.entities:
+            if e["entity_id"] == "select.thermostat_hc1_heatingtype":
+                e["state"] = "radiator"
+        server.sample()
+        self.page.reload()
+        self.tab("3 Heizungsanlage & Heizkreise")
+        self.page.click("#hs-adopt-existing")
+        self.page.locator("#adopt-confirm .confirm-ok").click()
+        expect(self.page.locator("#notice")).to_contain_text("Künftig automatisch nachgeführt: Heizflächenart Heizkreis")
+        self.assertIn("adopted_by_installer", self.v2()["building"]["heat_source"]["autofilled"]["circuit.emitter_type"])
+        expect(self.page.locator("#b-outdoor")).to_have_value("-12")
 
     def test_ab022_partial_match_is_hint_only(self):
         self.seed(rooms=("Wohnzimmer",))

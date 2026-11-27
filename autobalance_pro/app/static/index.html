@@ -127,7 +127,7 @@ label.check{font-weight:400;display:flex;gap:8px;align-items:flex-start}label.ch
 <div><label for="b-system">Heizsystem</label><select id="b-system"><option value="">Noch nicht festgelegt</option><option value="radiators">Heizkörper</option><option value="underfloor">Fußbodenheizung</option><option value="mixed">Gemischt</option></select></div>
 <div><label for="b-outdoor">Norm-Außentemperatur</label><div class="unit"><input id="b-outdoor" inputmode="decimal"><span>°C</span></div></div>
 <div><label for="b-outdoor-ref">Quelle Norm-Außentemperatur</label><input id="b-outdoor-ref"></div>
-</div></div></details>
+</div><p class="hint hidden" id="b-outdoor-controller"></p></div></details>
 <details class="section" id="sec-heatpump" open><summary>Wärmepumpe</summary><div class="body"><div class="grid">
 <div><label for="hp-manufacturer">Hersteller</label><input id="hp-manufacturer"></div>
 <div><label for="hp-model">Modell</label><input id="hp-model"></div>
@@ -139,13 +139,15 @@ label.check{font-weight:400;display:flex;gap:8px;align-items:flex-start}label.ch
 <div><label>Warmwasserstatus (HA)</label><div id="hp-dhw"></div></div>
 </div>
 <h3>Wärmepumpe und Heizkurve auslesen (nur lesen)</h3>
-<div id="hs-detect"></div>
+<div id="hs-detect"></div><div id="hs-autofill"></div>
 <p class="hint">Mit einem Geräteprofil liest AutoBalance Heizkurve, Vorlauf/Rücklauf und Betriebszustand der Wärmepumpe mit. Es werden keine Werte an die Wärmepumpe gesendet.</p>
 <div class="grid">
 <div><label for="hs-profile">Geräteprofil</label><select id="hs-profile"><option value="">Kein Profil</option></select></div>
 <div><label for="hs-source">Datenquelle</label><select id="hs-source"><option value="ha">Home Assistant (MQTT)</option><option value="emsesp_rest">EMS-ESP direkt (REST, nur lesen)</option></select></div>
 <div id="hs-host-wrap"><label for="hs-host">IP-Adresse des EMS-ESP / BBQKees</label><input id="hs-host" placeholder="z. B. 192.168.178.69" autocomplete="off"></div>
+<div id="hs-circuit-wrap"><label for="hs-circuit">Profil gilt für Heizkreis (Heizkreis 1 am Regler, HK1)</label><select id="hs-circuit"></select></div>
 </div>
+<div id="hs-switch"></div>
 <div class="actions"><button type="button" id="hs-test">Verbindung prüfen (nur lesen)</button></div>
 <div id="hs-result"></div>
 </div></details>
@@ -207,8 +209,9 @@ async function api(path,method='GET',obj){
 /* Saves are serialised: never two overlapping POSTs with stale state (design §5). */
 function saveConfig(next){
   const run=saveChain.then(async()=>{
-    await api('v2/config','POST',next);
-    cfg=clone(next);saved=clone(next);
+    const r=await api('v2/config','POST',next);
+    if(r&&r.autofill){cfg=await api('v2/config');saved=clone(cfg)}   // AB-029: the server may have filled fields
+    else{cfg=clone(next);saved=clone(next)}
     await loadReadiness();
   });
   saveChain=run.catch(()=>{});
@@ -596,9 +599,57 @@ function showPlant(){
   const hs=b.heat_source||{profile:'',source:'ha',emsesp_host:''};
   const sel=el('hs-profile');sel.replaceChildren(new Option('Kein Profil',''));for(const p of hsProfiles)sel.append(new Option(p.label,p.key));
   sel.value=hs.profile||'';el('hs-source').value=hs.source||'ha';el('hs-host').value=hs.emsesp_host||'';
+  const cs=el('hs-circuit');cs.replaceChildren();
+  if(cfg.circuits.length!==1)cs.append(new Option('Bitte wählen',''));
+  for(const c of cfg.circuits)cs.append(new Option(c.name,c.id));
+  cs.value=hs.circuit_id||(cfg.circuits.length===1?cfg.circuits[0].id:'');el('hs-switch').replaceChildren();
   el('hs-result').replaceChildren();syncHeatSource();
   drawCircuits();
   detectHeatSource(hs.profile);
+  renderAutofill(hs);
+}
+/* AB-029 / Review 12: persistent field status (from configuration provenance and current readings). */
+async function renderAutofill(hs){
+  const root=el('hs-autofill');root.replaceChildren();const ctl=el('b-outdoor-controller');ctl.classList.add('hidden');
+  if(!hs.profile)return;
+  let s;try{s=await api('v2/heat-source/autofill')}catch(_){return}
+  const box=document.createElement('div');box.className='info-box';box.id='hs-autofill-box';
+  const groups={};for(const f of s.fields)(groups[f.status]=groups[f.status]||[]).push(f);
+  autofillFields=s.fields;
+  const order=['auto','matches_unconfirmed','stale_source','unclear','manual','unavailable','unsupported','rest_no_entity','no_circuit','multi_circuit','unmapped','empty'];
+  for(const k of order){const list=groups[k];if(!list)continue;
+    const p=document.createElement('p');p.className='autofill-'+k+(k==='auto'?'':' hint');
+    p.textContent=list[0].text+': '+list.map(f=>f.label+(k==='auto'&&f.changed_at?' (Stand '+dateText(f.changed_at)+')':'')).join(', ');box.append(p);
+    if(k==='matches_unconfirmed'){   // AC13-04: only by explicit installer action
+      const b=document.createElement('button');b.type='button';b.id='hs-adopt-existing';b.textContent='Diese Werte künftig automatisch nachführen …';
+      b.addEventListener('click',()=>{
+        // AC14-01: never discard unsaved form input; no API call while the form has changes
+        if(plantDirty){notice('Bitte Anlagenangaben zuerst speichern oder Änderungen verwerfen. Es wurde nichts übernommen.',true);return}
+        inlineConfirm(box,{id:'adopt-confirm',text:'Die vorhandenen Werte ('+list.map(f=>f.label).join(', ')+') stimmen mit der Anlage überein. Sie werden künftig automatisch an Änderungen am Regler angepasst und bei einem Quellenwechsel neu übernommen.',ok:'Automatisch nachführen',
+        run:async()=>{
+          if(plantDirty){notice('Bitte Anlagenangaben zuerst speichern oder Änderungen verwerfen. Es wurde nichts übernommen.',true);return}
+          const r=await api('v2/heat-source/autofill/adopt','POST',{paths:list.map(f=>f.path),confirmed:true});
+          // AC14-02: report what really happened
+          const done=r.adopted||[],rest=list.map(f=>f.label).filter(l=>!done.includes(l));
+          if(!done.length)notice('Keine Werte übernommen. Anlagenwerte oder Datenquelle erneut prüfen.',true);
+          else notice('Künftig automatisch nachgeführt: '+done.join(', ')+(rest.length?'. Nicht übernommen (Anlagenwert weicht ab oder fehlt): '+rest.join(', '):'')+'.',Boolean(rest.length));
+          cfg=await api('v2/config');saved=clone(cfg);showPlant()}})});
+      box.append(b);
+    }
+  }
+  const n=document.createElement('p');n.className='hint';
+  n.textContent='Leere Felder werden automatisch gefüllt und bei Änderungen am Regler aktualisiert. Manuell hinterlegte Werte werden nie überschrieben. Es wird nichts an die Anlage gesendet.'
+    +(s.checked_ok_at?' Letzte Abfrage mit gültigen Profilwerten für '+sourceName(s)+': '+dateText(s.checked_ok_at)+'.':' Noch keine Abfrage mit gültigen Profilwerten für '+sourceName(s)+'.')
+    +(s.checked_at&&s.checked_at!==s.checked_ok_at?' Letzter Versuch ohne gültige Werte: '+dateText(s.checked_at)+'.':'');
+  box.append(n);root.append(box);
+  // Review 12, AC29-01: the controller's minimum outdoor temperature is shown separately, never adopted.
+  const params=((cfg.circuits.find(c=>c.id===s.circuit_id)||{}).heating_curve||{}).manufacturer_params||{};
+  const minExt=params['Minimale Außentemperatur (Auslegung)'];
+  if(minExt!==undefined){
+    const norm=cfg.building.design_outdoor_c;
+    ctl.textContent='Regler: minimale Außentemperatur '+String(minExt).replace('.',',')+' °C · Norm-Außentemperatur laut Heizlast: '+(norm===null||norm===undefined?'noch nicht bestätigt':String(norm).replace('.',',')+' °C');
+    ctl.classList.remove('hidden');
+  }
 }
 /* AB-022: propose a matching profile from existing HA entities; saving needs one click. */
 async function detectHeatSource(current){
@@ -622,9 +673,34 @@ function syncHeatSource(){
   const on=Boolean(el('hs-profile').value);
   el('hs-source').disabled=!on;el('hs-test').disabled=!on;
   el('hs-host-wrap').classList.toggle('hidden',!on||el('hs-source').value!=='emsesp_rest');
+  el('hs-circuit-wrap').classList.toggle('hidden',!on);
 }
-function heatSourceDraft(){return {profile:el('hs-profile').value,source:el('hs-source').value,emsesp_host:el('hs-host').value.trim()}}
-for(const id of ['hs-profile','hs-source','hs-host'])el(id).addEventListener('input',()=>{syncHeatSource();markPlantDirty()});
+function heatSourceDraft(){
+  const prev=(saved&&saved.building&&saved.building.heat_source)||{};
+  const d={profile:el('hs-profile').value,source:el('hs-source').value,emsesp_host:el('hs-host').value.trim(),
+    circuit_id:el('hs-circuit').value,autofilled:prev.autofilled||{}};   // AB-029: provenance stays with the server
+  const box=el('hs-switch-confirm');if(box&&box.checked)d.switch_confirmed=true;
+  return d;
+}
+/* Review 12, P0: switching profile, source or circuit removes automatic values of the old source - with consent. */
+function renderSourceSwitch(){
+  const root=el('hs-switch');const prev=(saved&&saved.building&&saved.building.heat_source)||{};
+  const auto=autofillFields.filter(f=>f.status==='auto').length||Object.keys(prev.autofilled||{}).length;
+  const eff=v=>v||(cfg.circuits.length===1?cfg.circuits[0].id:'');
+  const gw=(src,host)=>src==='emsesp_rest'?' über EMS-ESP '+(host||'?'):' über Home Assistant';
+  const label=key=>(hsProfiles.find(p=>p.key===key)||{}).label||'kein Profil';
+  const changed=(prev.profile||'')!==el('hs-profile').value||(prev.source||'ha')!==el('hs-source').value||eff(prev.circuit_id)!==eff(el('hs-circuit').value)
+    ||((prev.source||'ha')==='emsesp_rest'&&(prev.emsesp_host||'')!==el('hs-host').value.trim());
+  root.replaceChildren();
+  if(!changed||!auto||!prev.profile)return;
+  const box=document.createElement('div');box.className='warn-box';box.id='hs-switch-box';
+  const t=document.createElement('p');t.textContent='Datenquelle geändert: bisher '+label(prev.profile)+gw(prev.source||'ha',prev.emsesp_host)+', künftig '+label(el('hs-profile').value)+gw(el('hs-source').value,el('hs-host').value.trim())
+    +'. Beim Speichern werden '+auto+' automatisch verwaltete Werte der bisherigen Quelle entfernt und aus der neuen Quelle neu übernommen. Manuell hinterlegte Werte und Werte ohne bestätigte Herkunft bleiben bestehen.';
+  const l=document.createElement('label');l.className='check';const c=document.createElement('input');c.type='checkbox';c.id='hs-switch-confirm';
+  l.append(c,document.createTextNode(' Verstanden, automatische Werte der bisherigen Quelle entfernen'));
+  box.append(t,l);root.append(box);
+}
+for(const id of ['hs-profile','hs-source','hs-host','hs-circuit'])el(id).addEventListener('input',()=>{syncHeatSource();renderSourceSwitch();markPlantDirty()});
 el('hs-test').addEventListener('click',async()=>{
   const root=el('hs-result');root.textContent='Wird gelesen …';
   try{const r=await api('v2/heat-source/test','POST',heatSourceDraft());
@@ -911,6 +987,8 @@ function sensorFreshness(s){
   if(s.unchanged_check)t+=' Vor einer fachlichen Heizkurvenbewertung Fühler manuell prüfen.';
   return t;
 }
+let autofillFields=[];
+function sourceName(s){return (s.profile_label||'Geräteprofil')+(s.source==='emsesp_rest'?' über EMS-ESP '+(s.gateway||''):' über Home Assistant')}
 let sessionsRender=0;
 async function renderSessions(){
   const root=el('session-panel');if(!root)return;
