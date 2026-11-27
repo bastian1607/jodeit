@@ -88,7 +88,7 @@ class V2Browser(unittest.TestCase):
         for method, path in self.requests:
             self.assertTrue(path.startswith("/api/") or path in ("/", "/jodeit-logo.png"), path)
             if method == "POST":
-                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop"), path)
+                self.assertIn(path, ("/api/v2/config", "/api/v2/load-share-suggestion", "/api/v2/heat-source/test", "/api/v2/sessions/start", "/api/v2/sessions/stop", "/api/v2/sessions/archive", "/api/v2/sessions/delete", "/api/v2/reset"), path)
 
     # ------------------------------------------------------------- helpers
     def v2(self):
@@ -790,6 +790,104 @@ class MobileTests(V2Browser):
         expect(review).not_to_contain_text("Fühler manuell prüfen")      # < 24 h
         expect(review).not_to_contain_text("veraltet")
         expect(review).not_to_contain_text("Änderung")                   # never claims a temperature change
+
+
+    def test_ab026_retention_archive_delete_and_reset(self):
+        """AB-026 / Review 7: Löschtermin, Ablage bestätigen, Löschen und Vorbereiten nur über Formular im Seiteninhalt."""
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        self.seed(rooms=("Wohnzimmer",))
+        self.page.goto(self.url)     # first: stationary default -> no deadline, no notice
+        import retention
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"messkoffer": True}, f)
+        self.addCleanup(os.unlink, f.name)
+        kit = patch.object(retention, "OPTIONS_FILE", Path(f.name))
+        kit.start()
+        self.addCleanup(kit.stop)
+        jobs = []
+        for name, days in (("J-2026-123 Müller", 25), ("J-2026-124 Schulze", 3)):
+            with patch.object(server, "utcnow", return_value=now - timedelta(days=days + 1)):
+                job = server.start_session({"name": name, "confirmed": True})
+            with patch.object(server, "utcnow", return_value=now - timedelta(days=days)):
+                server.stop_session(job["id"])
+            jobs.append(job)
+        dialogs = []
+        self.page.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))   # no browser dialogs expected
+        self.open()
+        notice_box = self.page.locator(".retention-notice")
+        expect(notice_box).to_contain_text("J-2026-123 Müller")
+        expect(notice_box).to_contain_text("bis zur Löschung. Sicherung in Kundenakte prüfen.")
+        self.tab("5 Prüfen & Messung")
+        row = self.page.locator("#session-history .job-row", has_text="Müller")
+        expect(row).to_contain_text("(30 Tage nach Messende). HA-Sicherungen separat berücksichtigen.")
+        expect(row).to_contain_text("Ablage in Kundenakte noch nicht bestätigt")
+        expect(self.page.locator("#retention-mode")).to_contain_text("Messkoffer-Modus")
+        row.locator(".job-archive").click()
+        expect(row.locator("#archive-confirm")).to_contain_text("in der Jodeit-Kundenakte gesichert wurden. Die Löschung am")
+        row.locator("#archive-confirm .confirm-ok").click()
+        row = self.page.locator("#session-history .job-row", has_text="Müller")
+        expect(row).to_contain_text("Ablage durch Techniker bestätigt am")
+        self.shot("ab026-loeschung")
+        row.locator(".job-delete").click()
+        box = row.locator("#delete-confirm")
+        expect(box).to_contain_text(jobs[0]["id"])
+        expect(box).to_contain_text("Vorhandene HA-Sicherungen können weiterhin Daten enthalten und müssen separat geprüft werden.")
+        box.locator(".confirm-word").fill("falsch")
+        box.locator(".confirm-ok").click()
+        expect(self.page.locator("#notice")).to_contain_text("Nichts geändert")
+        box.locator(".confirm-cancel").click()
+        expect(row.locator("#delete-confirm")).to_have_count(0)
+        self.assertIsNotNone(server.get_session(jobs[0]["id"]))
+        row.locator(".job-delete").click()
+        row.locator("#delete-confirm .confirm-word").fill("J-2026-123 Müller")
+        row.locator("#delete-confirm .confirm-ok").click()
+        expect(self.page.locator("#session-history")).not_to_contain_text("Müller")
+        # Messgerät vorbereiten: Abbrechen ändert nichts (review 7 d)
+        self.page.locator("#reset-box summary").click()
+        self.page.click("#reset-start")
+        reset = self.page.locator("#reset-confirm")
+        expect(reset.locator("#reset-jobs")).to_contain_text("J-2026-124 Schulze")
+        expect(reset.locator("#reset-jobs")).to_contain_text("Ablage NICHT bestätigt")
+        reset.locator(".confirm-word").fill("NEUER KUNDE")
+        reset.locator(".confirm-cancel").click()
+        expect(self.page.locator("#reset-confirm")).to_have_count(0)
+        self.assertIsNotNone(server.get_session(jobs[1]["id"]))
+        self.assertNotEqual(self.v2()["rooms"], [])
+        self.page.click("#reset-start")
+        reset.locator(".confirm-word").fill("NEUER KUNDE")
+        reset.locator(".confirm-ok").click()
+        expect(self.page.locator("#notice")).to_contain_text("ausdrücklich bestätigen")
+        self.assertIsNotNone(server.get_session(jobs[1]["id"]))
+        reset.locator("#reset-allow-unarchived").check()
+        reset.locator(".confirm-ok").click()
+        expect(self.page.locator("#notice")).to_contain_text("Messgerät vorbereitet")
+        self.assertEqual(self.v2()["rooms"], [])
+        self.assertIsNone(server.get_session(jobs[1]["id"]))
+        self.assertEqual(dialogs, [])
+
+    def test_ab026_stationary_shows_no_deadline(self):
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        self.seed(rooms=("Wohnzimmer",))
+        with patch.object(server, "utcnow", return_value=now - timedelta(days=26)):
+            job = server.start_session({"name": "J-2026-125", "confirmed": True})
+        with patch.object(server, "utcnow", return_value=now - timedelta(days=25)):
+            server.stop_session(job["id"])
+        self.open()
+        expect(self.page.locator(".retention-notice")).to_have_count(0)
+        self.tab("5 Prüfen & Messung")
+        row = self.page.locator("#session-history .job-row")
+        expect(row).to_contain_text("Stationärer Betrieb: keine automatische Löschung")
+        expect(self.page.locator("#retention-mode")).to_contain_text("es wird nichts automatisch gelöscht")
+
+    def test_ab026_purge_error_banner(self):
+        self.seed(rooms=("Wohnzimmer",))
+        server._set_state(last_run=datetime.now(timezone.utc).isoformat(), register="unavailable",
+                          errors=[{"code": "job", "text": "Eine fällige Messung konnte nicht gelöscht werden.", "at": ""}])
+        self.open()
+        expect(self.page.locator("#retention-error")).to_contain_text("Automatischer neuer Versuch stündlich")
+        expect(self.page.locator("#retention-register")).to_contain_text("nicht beschreibbar")
 
 
 if __name__ == "__main__":

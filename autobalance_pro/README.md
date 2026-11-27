@@ -19,6 +19,49 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Messdaten, Aufbewahrung und Löschung (AB-025, AB-026)
+
+- Jede Messung hat eine eigene ID. Messwerte, die während einer Messung erfasst werden, tragen diese ID.
+  Auswertung, Bericht und CSV einer Messung lesen nur diese Werte. Beim Start wird die Konfiguration samt
+  Geräteprofil gespeichert, beim Stoppen werden Auswertung und Bericht unverändert festgeschrieben.
+- **Automatische Löschung nur im Messkoffer-Modus** (App-Option `messkoffer`, Standard `false`; Entscheidung
+  Bastian 27.11.2026): Messwerte, Konfigurations-Snapshots, Bericht, Bezeichnung und Notiz einer Messung
+  30 Kalendertage nach Messende (interne Jodeit-Regel, keine gesetzliche Frist). Die Frist wird durch Export,
+  Bericht oder Neustart nicht verlängert. Laufende Messungen werden nie automatisch gelöscht. Hinweise 7 Tage
+  vorher (ohne bestätigte Ablage) und am letzten Tag. Verpasste Fristen werden beim nächsten Start nachgeholt.
+  Messwerte außerhalb von Messungen, Konfigurationsverlauf und App-Ereignisse werden dort nach 30 Tagen gelöscht.
+- **Stationärer Betrieb (Standard):** keine automatische Löschung. Manuelles Löschen, „Messgerät für nächsten
+  Kunden vorbereiten“ und das Löschregister gelten trotzdem.
+- „Messung jetzt vom Messgerät löschen …“ (Bezeichnung eingeben) und „Messgerät für nächsten Kunden vorbereiten …“
+  in Schritt 5, jeweils als Formular im Seiteninhalt mit „Vorgang abbrechen“. Das Vorbereiten löscht immer alle
+  Messungen; Messungen ohne bestätigte Ablage in der Kundenakte nur nach ausdrücklicher Bestätigung (sonst
+  bleibt alles unverändert).
+- Physische Bereinigung: `PRAGMA secure_delete`, WAL-Checkpoint und `VACUUM`. Lokale App-Sicherungen in
+  `/data/backups` werden **nicht nach Dateidatum gelöscht**, sondern bereinigt: gelöschte und abgelaufene Messungen
+  per Messungs-ID (bei alten Schemata per Messzeitraum aus dem Löschprotokoll) sowie lose Daten > 30 Tage,
+  danach `VACUUM` der Sicherung. Nur beim bestätigten Vorbereiten für den nächsten Kunden werden sie entfernt.
+- Löschregister ohne personenbezogene Daten (ID, Zeitpunkt, Grund) in `/share/autobalance/geloeschte-messungen.json`
+  (dafür ist der Ordner `share` eingebunden): Nach Wiederherstellung einer reinen App-Sicherung löscht die App
+  bereits gelöschte Messungen beim Start erneut. Ein beschädigtes Register wird beiseitegelegt und aus dem
+  Löschprotokoll neu aufgebaut; ist `/share` nicht beschreibbar, zeigt die Übersicht einen Hinweis.
+- Fehler eines Löschlaufs bleiben in der Übersicht sichtbar (`GET api/v2/retention` → `status`), bis ein späterer
+  Lauf erfolgreich war. Neuer Versuch stündlich.
+- **Konfiguration im Messkoffer-Modus:** Ist keine Messung mehr vorhanden und wurde die Konfiguration zuletzt
+  vor dem Ende einer per Frist gelöschten Messung geändert, werden Räume, Fühlerzuordnung, Anlagenangaben,
+  Konfigurationsverlauf und Messwerte außerhalb von Messungen entfernt, ebenso in den lokalen App-Sicherungen.
+  Eine vorbereitete Konfiguration ohne abgelaufene Messung bleibt erhalten (keine Leerlauf-Frist).
+- Beim Löschen einer Messung werden auch Messwerte außerhalb von Messungen von deren Fühlern entfernt, sofern die
+  aktuelle Konfiguration sie nicht mehr verwendet.
+- **Grenzen:** Home-Assistant-Sicherungen (vollständig oder App) enthalten den Datenstand zum Sicherungszeitpunkt;
+  die App liest oder löscht sie nicht. Deren Aufbewahrung liegt beim Betreiber (Messkoffer: Betriebsprozess).
+  Wird eine Vollsicherung inklusive `share` wiederhergestellt, gilt das Register dieses Zeitpunkts: abgelaufene
+  Messungen werden beim Start erneut gelöscht, früher manuell gelöschte erscheinen bis zu ihrer ursprünglichen Frist
+  wieder.
+- **Betriebsgrenze Messkoffer (bis zu einer technischen Lösung):** Keine HA-Vollwiederherstellung mit echten
+  Kundendaten ohne vorher extern verwahrte Liste der gelöschten Messungs-IDs (`/share/autobalance/…json`); nach
+  einer Wiederherstellung vor der nächsten Kundenmessung bereinigen und prüfen. HA-Sicherungen auf dem Messkoffer
+  dokumentiert der Techniker und ersetzt/löscht sie bei Fälligkeit gezielt (Betriebsanweisung in Outline).
+
 ## Änderungen in v0.4.0 (freigegeben 27.11.2026)
 
 Weiterhin rein lesend: keine Steuerbefehle an Wärmepumpe, Ventile oder Home Assistant.
