@@ -500,6 +500,43 @@ class AcceptanceTests(V2Browser):
         expect(self.page.locator("header .tag")).to_have_text("Nur Messung · keine Steuerbefehle")
 
 
+    def test_ab021_insecure_http_context_without_random_uuid(self):
+        """AB-021: Home Assistant via http://<LAN-IP> has no crypto.randomUUID. Room, emitter and zone must still work."""
+        self.page.add_init_script("delete Crypto.prototype.randomUUID;")
+        self.seed(rooms=("Wohnzimmer", "Küche"))
+        self.open()
+        self.assertFalse(self.page.evaluate("typeof crypto.randomUUID === 'function'"))
+        self.tab("1 Räume")
+        self.page.get_by_role("button", name="+ Raum anlegen").click()
+        expect(self.page.locator("#room-editor")).to_be_visible()
+        expect(self.page.locator("#room-heading")).to_have_text("Raum anlegen")
+        self.page.locator("#r-name").fill("Bad")
+        self.pick("#r-temperature", "Bad Temperatur")
+        self.open_section("sec-emitters")
+        self.page.get_by_role("button", name="+ Heizfläche").click()
+        expect(self.page.locator("#r-radiators > details")).to_have_count(1)
+        self.page.get_by_role("button", name="Raum speichern").click()
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        cfg = self.v2()
+        bad = next(r for r in cfg["rooms"] if r["name"] == "Bad")
+        self.assertRegex(bad["id"], r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+        self.assertRegex(cfg["emitters"][-1]["id"], r"^hf_[0-9a-f]{12}$")
+        self.tab("2 Thermische Zonen")
+        self.page.locator("#z-name").fill("Wohnen und Kochen")
+        self.page.locator("#z-rooms label", has_text="Wohnzimmer").locator("input").check()
+        self.page.locator("#z-rooms label", has_text="Küche").locator("input").check()
+        self.page.get_by_role("button", name="Zone erstellen").click()
+        expect(self.page.locator("#notice")).to_contain_text("gespeichert")
+        self.assertEqual(len(self.v2()["zones"]), 1)
+
+    def test_ab021_no_secure_random_source_shows_message(self):
+        self.page.add_init_script("delete Crypto.prototype.randomUUID; delete Crypto.prototype.getRandomValues;")
+        self.open()
+        self.tab("1 Räume")
+        self.page.get_by_role("button", name="+ Raum anlegen").click()
+        expect(self.page.locator("#notice")).to_contain_text("keine sichere Zufallsquelle")
+        expect(self.page.locator("#room-editor")).to_be_hidden()
+
 class MobileTests(V2Browser):
     viewport = {"width": 390, "height": 844}
 
