@@ -168,6 +168,19 @@ let saveChain=Promise.resolve();
 const el=id=>document.getElementById(id);
 const safe=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
 const clone=o=>JSON.parse(JSON.stringify(o));
+/* AB-021: crypto.randomUUID() exists only in secure contexts (HTTPS/localhost). Home Assistant is
+   often opened via http://<LAN-IP>, so fall back to crypto.getRandomValues (available everywhere).
+   Never fall back to Math.random: without a secure random source the user gets a clear message. */
+function newId(){
+  const c=globalThis.crypto;
+  if(c&&typeof c.randomUUID==='function')return c.randomUUID();
+  if(c&&typeof c.getRandomValues==='function'){
+    const b=c.getRandomValues(new Uint8Array(16));b[6]=(b[6]&0x0f)|0x40;b[8]=(b[8]&0x3f)|0x80;
+    const h=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+    return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+  }
+  throw new Error('Dieser Browser bietet keine sichere Zufallsquelle. Bitte einen aktuellen Browser verwenden.');
+}
 const TYPES={panel:'Plattenheizkörper',column:'Röhrenheizkörper',convector:'Konvektor',towel:'Badheizkörper',underfloor:'FBH-Kreis',other:'Sonstige'};
 const SOURCES={manufacturer:'Herstellerangabe',document:'Dokument',unknown:'Unbekannt'};
 
@@ -300,9 +313,9 @@ function showRooms(){
     actions.append(edit,document.createTextNode(' '),del);item.append(info,actions);list.append(item);
   }
 }
-el('add-room').addEventListener('click',()=>openRoom(null));
+el('add-room').addEventListener('click',()=>{try{openRoom(null)}catch(ex){notice('Raum kann nicht angelegt werden: '+ex.message,true)}});
 let roomEmitters=[];
-function newRoom(){return {id:crypto.randomUUID(),name:'',target:21,area:null,default_circuit_id:cfg.circuits[0]?.id||null,
+function newRoom(){return {id:newId(),name:'',target:21,area:null,default_circuit_id:cfg.circuits[0]?.id||null,
   heat_load:{status:'missing',value_w:null,method:'',reference:'',author:'',date:null,legacy_value_w:null},temperature_sensors:[],window_sensors:[]}}
 function openRoom(id,emitterId=null,sectionId=null){
   if(!el('room-editor').classList.contains('hidden')&&roomDirty&&!confirm('Es gibt ungespeicherte Änderungen. Verwerfen?'))return;
@@ -405,7 +418,8 @@ function drawEmitters(){
 el('add-emitter').addEventListener('click',()=>{
   roomEmitters=collectEmitters(true);
   const fallback=el('r-circuit').value||cfg.circuits[0].id;
-  roomEmitters.push({id:'hf_'+crypto.randomUUID().replaceAll('-','').slice(0,12),room_id:editingRoom.id,circuit_id:fallback,name:'Heizfläche '+(roomEmitters.length+1),type:null,construction:'',height_mm:null,length_mm:null,
+  let emitterId;try{emitterId='hf_'+newId().replaceAll('-','').slice(0,12)}catch(ex){return notice('Heizfläche kann nicht angelegt werden: '+ex.message,true)}
+  roomEmitters.push({id:emitterId,room_id:editingRoom.id,circuit_id:fallback,name:'Heizfläche '+(roomEmitters.length+1),type:null,construction:'',height_mm:null,length_mm:null,
     rated_output:{value_w:null,flow_c:null,return_c:null,room_c:null,source:'unknown',reference:''},exponent:null,load_share_percent:null,
     valve:{label:'',manufacturer:'',series:'',variant:'',dimension:'',current_setting:''},actuator_entity:''});
   drawEmitters();markRoomDirty();
@@ -530,7 +544,8 @@ el('zone-form').addEventListener('submit',async ev=>{
   if(ids.length<2)return notice('Mindestens zwei Räume auswählen.',true);
   const used=cfg.zones.find(z=>z.room_ids.some(id=>ids.includes(id)));
   if(used)return notice('Der Raum ist bereits der Zone „'+used.name+'“ zugeordnet.',true);
-  const next=clone(cfg);next.zones.push({id:crypto.randomUUID(),name,room_ids:ids});
+  let zoneId;try{zoneId=newId()}catch(ex){return notice('Zone kann nicht angelegt werden: '+ex.message,true)}
+  const next=clone(cfg);next.zones.push({id:zoneId,name,room_ids:ids});
   try{await saveConfig(next);el('z-name').value='';notice('Konfiguration gespeichert.');showZones()}catch(ex){notice('Nicht gespeichert: '+ex.message,true)}
 });
 async function delZone(i){const next=clone(cfg);next.zones.splice(i,1);try{await saveConfig(next);notice('Konfiguration gespeichert.');showZones()}catch(ex){notice(ex.message,true)}}
