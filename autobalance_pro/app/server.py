@@ -1,7 +1,7 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
 import json,sys,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
-import model,coverage,devices,monitoring,assessment,uuid
+import model,coverage,devices,monitoring,assessment,report,uuid
 from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
@@ -287,17 +287,21 @@ def heat_source_snapshot(now=None):
         "source":source.get("source"),"source_errors":HEAT_SOURCE_STATUS["errors"] if source.get("source")=="emsesp_rest" else {},
         "fields":items,"rooms":rooms,"read_only":True}
 
-def export_csv(hours=168,now=None):
-    import csv,io
-    now=now or utcnow();start=(now-timedelta(hours=hours)).isoformat()
-    cfg=load_v2();desired=wanted(cfg);labels={sid:f["label"] for sid,f in devices.entities(heat_source(cfg)).items()}
+def entity_labels(cfg):
+    labels={sid:f["label"] for sid,f in devices.entities(heat_source(cfg)).items()}
     for r in cfg["rooms"]:
         for e in r.get("temperature_sensors",[]):labels[e]="Raum "+r["name"]+" Temperatur"
         for e in r.get("window_sensors",[]):labels[e]="Raum "+r["name"]+" Fenster"
+    return labels
+
+def export_csv(hours=168,now=None,start=None,end=None):
+    import csv,io
+    now=now or utcnow();start=start or (now-timedelta(hours=hours)).isoformat();end=end or now.isoformat()
+    cfg=load_v2();desired=wanted(cfg);labels=entity_labels(cfg)
     buf=io.StringIO();w=csv.writer(buf,delimiter=";")
     w.writerow(["zeit_utc","entity_id","bezeichnung","zustand","wert_normiert","einheit","qualitaet"])
     with connect() as c:
-        for at,eid,st,unit,q,nv,nu in c.execute("SELECT at,entity_id,state,unit,quality,normalized_value,normalized_unit FROM samples WHERE at>=? ORDER BY at,entity_id",(start,)):
+        for at,eid,st,unit,q,nv,nu in c.execute("SELECT at,entity_id,state,unit,quality,normalized_value,normalized_unit FROM samples WHERE at>=? AND at<=? ORDER BY at,entity_id",(start,end)):
             if eid in desired:w.writerow([at,eid,labels.get(eid,""),st,"" if nv is None else nv,nu or unit or "",q or "unchecked"])
     return buf.getvalue()
 
@@ -427,6 +431,33 @@ def session_assessment(sid,now=None):
     result["texts"]=assessment.report_text(result)
     return result
 
+def session_report(sid,now=None):
+    """AB-020 AC-06: printable report of a measuring job (HTML). Read-only on the local DB."""
+    now=now or utcnow()
+    result=session_assessment(sid,now)
+    if result is None:return None
+    s=get_session(sid);end=s["ended_at"] or now.isoformat()
+    with connect() as c:
+        ticks=[coverage.parse(r[0]) for r in c.execute("SELECT DISTINCT at FROM samples WHERE at>=? AND at<=? ORDER BY at",(s["started_at"],end))]
+        events=[{"at":a,"kind":k} for a,k in c.execute("SELECT at,kind FROM app_events WHERE at>=? AND at<=? ORDER BY at",(s["started_at"],end))]
+        cfg=load_v2();fields=devices.entities(heat_source(cfg));params=[]
+        for sid_,f in fields.items():
+            if f["kind"]!="setting":continue
+            row=c.execute("SELECT state FROM samples WHERE entity_id=? AND at<=? ORDER BY at DESC LIMIT 1",(sid_,end)).fetchone()
+            if row and row[0] not in ("unavailable","unknown",""):params.append((f["label"],row[0],f["unit"]))
+    start_dt=coverage.parse(s["started_at"]);end_dt=coverage.parse(end);ticks=[t for t in ticks if t]
+    def gap(a,b,ongoing=False):return {"start":a,"end":b,"ongoing":ongoing,"minutes":round((b-a).total_seconds()/60)}
+    if not ticks:
+        gaps=[gap(start_dt,end_dt,not s["ended_at"])] if (end_dt-start_dt).total_seconds()>coverage.WARN_SECONDS else []
+    else:
+        # A finished job ends at its end time: a missing tail is an ordinary gap, not an ongoing one.
+        gaps=coverage.find_gaps(ticks if not s["ended_at"] else ticks+[end_dt],end_dt,start_dt)
+        if (ticks[0]-start_dt).total_seconds()>coverage.WARN_SECONDS:gaps.insert(0,gap(start_dt,ticks[0]))
+    gaps=[dict(g,start=g["start"].isoformat(),end=g["end"].isoformat()) for g in gaps]
+    tz,tz_name,_=plant_timezone()
+    labels=entity_labels(cfg)
+    return report.render(s,result,gaps,events,params,labels,tz,tz_name,VERSION,now)
+
 def log_event(kind,detail=None):
     with connect() as c:c.execute("INSERT INTO app_events(at,kind,detail) VALUES(?,?,?)",(utcnow().isoformat(),kind,detail))
 
@@ -516,6 +547,26 @@ class API(BaseHTTPRequestHandler):
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
         if path=="/api/v2/rooms/status":return self.send_json(200,rooms_status())
         if path=="/api/v2/sessions":return self.send_json(200,list_sessions())
+        if path.startswith("/api/v2/sessions/") and path.endswith("/report"):
+            body=session_report(path.split("/")[4])
+            if body is None:return self.send_json(404,{"error":"Messauftrag nicht gefunden"})
+            body=body.encode()
+            self.send_response(200)
+            self.send_header("Content-Type","text/html; charset=utf-8")
+            self.send_header("Cache-Control","no-store")
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
+        if path.startswith("/api/v2/sessions/") and path.endswith("/export.csv"):
+            s=get_session(path.split("/")[4])
+            if not s:return self.send_json(404,{"error":"Messauftrag nicht gefunden"})
+            body=("\ufeff"+export_csv(start=s["started_at"],end=s["ended_at"])).encode()
+            self.send_response(200)
+            self.send_header("Content-Type","text/csv; charset=utf-8")
+            self.send_header("Content-Disposition","attachment; filename=autobalance-"+s["id"]+".csv")
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         if path.startswith("/api/v2/sessions/") and path.endswith("/assessment"):
             result=session_assessment(path.split("/")[4])
             return self.send_json(200,result) if result else self.send_json(404,{"error":"Messauftrag nicht gefunden"})

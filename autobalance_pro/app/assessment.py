@@ -369,28 +369,30 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
     return out
 
 
-def report_text(result):
-    """German report sentences for the cases defined in the AB-014 concept."""
-    w = result["window"]
+def _de(value):
+    return f"{value:.1f}".replace(".", ",").replace("-", "−")
+
+
+def report_text(result, fmt=lambda iso: iso):
+    """German report sentences for the cases defined in the AB-014 concept. ``fmt`` formats ISO times."""
     band = result["outdoor_band"]
+    outdoor = "regelungsrelevante (gedämpfte) Außentemperatur" if band["damped"] else "ungedämpfte Außentemperatur"
     texts = []
     if result["stage"] in ("no_data", "insufficient"):
         texts.append(f"Im Messzeitraum waren {result['valid_nights']} geeignete Nächte mit insgesamt "
-                     f"{str(result['valid_hours']).replace('.', ',')} verwertbaren Stunden vorhanden. "
+                     f"{_de(result['valid_hours'])} verwertbaren Stunden vorhanden. "
                      f"Erforderlich sind nach dem aktuellen Pilotregelwerk mindestens {THRESHOLDS['nights_level']} Nächte. "
                      "Messung unzureichend. Heizkurvenvorschlag nicht belastbar. Messdauer verlängern oder Anlage manuell prüfen.")
     if result["stage"] == "level" and band["min"] is not None:
-        texts.append(f"Die regelungsrelevante Außentemperatur lag während geeigneter Messzeiten zwischen "
-                     f"{band['min']:g} und {band['max']:g} °C (Spanne {band['span_k']:g} K). "
+        texts.append(f"Die {outdoor} lag während geeigneter Messzeiten zwischen "
+                     f"{_de(band['min'])} und {_de(band['max'])} °C (Spanne {_de(band['span_k'])} K). "
                      "Nur Heizkurvenniveau innerhalb des gemessenen Außentemperaturbereichs beurteilbar. "
                      "Steigung und Frostverhalten nicht nachgewiesen.")
     if result["stage"] == "level_and_slope":
-        texts.append(f"Die Messung deckte einen Außentemperaturbereich von {band['min']:g} bis {band['max']:g} °C mit "
+        texts.append(f"Die Messung deckte eine {outdoor} von {_de(band['min'])} bis {_de(band['max'])} °C mit "
                      f"{result['valid_nights']} geeigneten Nächten ab. Eine Anpassung des Auslegungspunkts kann fachlich "
                      "geprüft werden. Die Aussage gilt nur für diese Messbereiche; eine volle Jahresvalidierung ist nicht erfolgt.")
     for o in result["long_outages"]:
-        texts.append(f"Zwischen {o['start']} und {o['end']} fehlen Messwerte. Dieser Zeitraum wurde nicht ersetzt. "
+        texts.append(f"Zwischen {fmt(o['start'])} und {fmt(o['end'])} fehlen Messwerte. Dieser Zeitraum wurde nicht ersetzt. "
                      "Der Bericht kennzeichnet die eingeschränkte Aussagekraft.")
-    if not w["complete"]:
-        texts.append("Der Messauftrag ist noch nicht abgeschlossen; das Ergebnis ist vorläufig.")
     return texts

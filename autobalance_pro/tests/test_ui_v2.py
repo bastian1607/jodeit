@@ -613,6 +613,19 @@ class AcceptanceTests(V2Browser):
         for forbidden in ("Offset auf", "Heizkurve anheben", "Empfehlung übernehmen"):
             self.assertNotIn(forbidden, content)
         self.shot("ab014-auswertung")
+        # AC-06: report opens from step 5; AC-020-11: dashboard shows coverage since job start
+        with self.page.expect_popup() as popup:
+            self.page.click("#report-link")
+        report = popup.value
+        expect(report.locator("#report-result")).to_contain_text("Niveau im Messbereich prüfbar")
+        expect(report.locator("body")).to_contain_text("Nicht überwachte Räume: Bad")
+        if os.environ.get("AUTO_BALANCE_SCREENSHOTS"):
+            report.screenshot(path=str(Path(os.environ["AUTO_BALANCE_SCREENSHOTS"]) / "ab020-messbericht.png"), full_page=True)
+        report.close()
+        self.tab("Übersicht")
+        expect(self.page.locator("#stats")).to_contain_text("Abdeckung seit Messbeginn")
+        expect(self.page.locator("#stats")).to_contain_text("Ziel: 7 Tage")
+        self.assertNotIn("Abdeckung 7 Tage", self.page.locator("#stats").inner_text())
 
 
 class MobileTests(V2Browser):
