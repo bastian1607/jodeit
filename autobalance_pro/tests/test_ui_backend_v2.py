@@ -26,6 +26,8 @@ def two_radiator_room():
     a["rated_output"].update(value_w=1200, flow_c=75, return_c=65, room_c=20)
     b["rated_output"].update(value_w=600, flow_c=75, return_c=65, room_c=20)
     a["exponent"] = b["exponent"] = 1.3
+    room = next(r for r in cfg["rooms"] if r["id"] == "wohnen")
+    room.update(design_indoor_c=21, design_indoor_reference="Heizlastberechnung Test")
     return cfg
 
 
@@ -52,6 +54,15 @@ class SuggestionTests(unittest.TestCase):
         q_b = 1200 * (lm(55, 45, 21) / lm(55, 45, 20)) ** 1.3
         self.assertAlmostEqual(shares[cfg["emitters"][0]["id"]], round(100 * q_a / (q_a + q_b), 1), places=6)
         self.assertGreater(shares[cfg["emitters"][1]["id"]], 50)
+
+    def test_ab013_comfort_target_is_never_used_as_design_indoor_temperature(self):
+        cfg = two_radiator_room()
+        room = next(r for r in cfg["rooms"] if r["id"] == "wohnen")
+        room.update(design_indoor_c=None, design_indoor_reference="")
+        shares, reason = model.suggest_load_shares(cfg, "wohnen")
+        self.assertIsNone(shares)
+        self.assertIn("Auslegungs-Innentemperatur fehlt", reason)
+        self.assertIn("design_indoor_missing", [b["code"] for b in model.readiness(cfg)["rooms"]["wohnen"]["blockers"]])
 
     def test_no_suggestion_without_comparable_data(self):
         for mutate, fragment in (
