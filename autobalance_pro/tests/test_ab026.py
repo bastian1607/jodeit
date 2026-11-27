@@ -258,6 +258,93 @@ class DeletionTests(Retention):
         self.assertIsNone(server.get_session(s["id"]))
 
 
+class MobileKitConfigTests(Retention):
+    """Review 8, P0: customer configuration must not survive the deadline on the mobile measuring kit."""
+
+    def kit(self, on=True):
+        opts = Path(self.reg.name) / "options.json"
+        opts.write_text(json.dumps({"messkoffer": on}))
+        patcher = patch.object(retention, "OPTIONS_FILE", opts)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def raw(self, path=None):
+        path = Path(path or server.DB)
+        wal = Path(str(path) + "-wal")
+        return path.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
+
+    def backup(self, name):
+        folder = Path(server.DB).parent / "backups"
+        folder.mkdir(exist_ok=True)
+        target = folder / name
+        src, dst = sqlite3.connect(server.DB), sqlite3.connect(str(target))
+        src.backup(dst); src.close(); dst.close()
+        return target
+
+    def test_customer_a_gone_from_db_and_backup_31_days_later(self):
+        self.kit()
+        a = self.stopped("Auftrag A", END - timedelta(days=2), END, sensor="sensor.alpha_kunde")
+        self.put([(END + timedelta(days=1), "sensor.alpha_kunde", 20.0)])     # passive sample after the job
+        bak = self.backup("autobalance-a.db")
+        self.assertIn(b"sensor.alpha_kunde", self.raw(bak))
+        r = server.purge(END + timedelta(days=31))
+        self.assertTrue(r["config_neutralized"])
+        self.assertIsNone(server.get_session(a["id"]))
+        self.assertEqual(server.load_v2(), server.model.empty())
+        for blob in (self.raw(), self.raw(bak)):
+            self.assertNotIn(b"sensor.alpha_kunde", blob)
+            self.assertNotIn(b"Auftrag A", blob)
+        self.assertTrue(bak.exists())
+        self.assertFalse(server.purge(END + timedelta(days=32))["config_neutralized"])   # idempotent
+
+    def test_customer_b_and_its_config_stay(self):
+        self.kit()
+        a = self.stopped("Auftrag A", END - timedelta(days=2), END, sensor="sensor.alpha_kunde")
+        self.put([(END + timedelta(days=d), "sensor.alpha_kunde", 20.0) for d in (1, 2, 3, 4)])   # loose, < 30 days at day 31
+        b = self.stopped("Auftrag B", END + timedelta(days=6), END + timedelta(days=7), sensor="sensor.beta_kunde")
+        bak = self.backup("autobalance-ab.db")
+        r = server.purge(END + timedelta(days=31))
+        self.assertFalse(r["config_neutralized"])
+        self.assertIsNone(server.get_session(a["id"]))
+        self.assertIsNotNone(server.get_session(b["id"]))
+        self.assertEqual(server.load_v2()["rooms"][0]["temperature_sensors"], ["sensor.beta_kunde"])
+        self.assertGreater(self.count(b["id"]), 0)
+        for blob in (self.raw(), self.raw(bak)):
+            self.assertNotIn(b"sensor.alpha_kunde", blob)        # also its loose samples outside the job window
+            self.assertIn(b"sensor.beta_kunde", blob)
+        with sqlite3.connect(str(bak)) as c:
+            self.assertEqual({r[0] for r in c.execute("SELECT id FROM sessions")}, {b["id"]})
+            self.assertEqual(json.loads(c.execute("SELECT value FROM config_v2").fetchone()[0])["rooms"][0]["temperature_sensors"],
+                             ["sensor.beta_kunde"])
+        server.purge(END + timedelta(days=38))                   # B expires -> device empty
+        self.assertEqual(server.load_v2(), server.model.empty())
+        self.assertNotIn(b"sensor.beta_kunde", self.raw())
+        self.assertNotIn(b"sensor.beta_kunde", self.raw(bak))
+
+    def test_config_without_any_job_expires_after_30_days(self):
+        self.kit()
+        with self.at(END):
+            server.save_v2(customer("Raum", "sensor.gamma_kunde"))
+        self.assertFalse(server.purge(END + timedelta(days=29))["config_neutralized"])
+        self.assertTrue(server.purge(END + timedelta(days=30, minutes=1))["config_neutralized"])
+        self.assertNotIn(b"sensor.gamma_kunde", self.raw())
+
+    def test_running_job_blocks_neutralization(self):
+        self.kit()
+        self.job("Auftrag A", customer("Raum", "sensor.alpha_kunde"), END - timedelta(days=40), hours=1)   # still running
+        self.assertFalse(server.purge(END)["config_neutralized"])
+        self.assertNotEqual(server.load_v2()["rooms"], [])
+
+    def test_stationary_installation_keeps_its_configuration(self):
+        self.kit(False)                                          # default: not a measuring kit
+        a = self.stopped("Auftrag A", END - timedelta(days=2), END, sensor="sensor.alpha_kunde")
+        r = server.purge(END + timedelta(days=31))
+        self.assertIsNone(server.get_session(a["id"]))           # the job itself is still deleted
+        self.assertFalse(r["config_neutralized"])
+        self.assertEqual(server.load_v2()["rooms"][0]["temperature_sensors"], ["sensor.alpha_kunde"])
+        self.assertFalse(server.retention_state()["mobile_kit"])
+
+
 class ResetTests(Retention):
     def test_reset_for_new_customer(self):
         a = self.stopped("Kunde A", END - timedelta(hours=2), END)

@@ -959,6 +959,11 @@ async function renderSessions(){
   if(run!==sessionsRender)return;
   const done=sessionsData.sessions.filter(s=>s.ended_at);
   const h=document.createElement('h3');h.textContent='Frühere Messungen';root.append(h);
+  const mode=document.createElement('p');mode.className='hint';mode.id='retention-mode';
+  mode.textContent=sessionsData.retention?.mobile_kit
+    ?'Messkoffer-Modus: Nach Ablauf der letzten Frist werden auch Räume, Fühlerzuordnung und Anlagenangaben vom Gerät entfernt.'
+    :'Stationärer Betrieb: Messungen werden nach 30 Tagen gelöscht, die Konfiguration bleibt erhalten. Vor einem Kundenwechsel „Messgerät für nächsten Kunden vorbereiten“ verwenden.';
+  root.append(mode);
   const list=document.createElement('div');list.id='session-history';
   if(!done.length){const p=document.createElement('p');p.className='hint';p.textContent='Noch keine abgeschlossene Messung.';list.append(p)}
   for(const s of done){const row=document.createElement('div');row.className='item job-row';

@@ -19,6 +19,33 @@ WARN_DAYS = (7, 1)           # notices before the deadline
 LOOSE_DATA_DAYS = 30         # passive samples, configuration history and app events outside jobs
 PURGE_INTERVAL_SECONDS = 3600
 
+OPTIONS_FILE = Path(os.environ.get("AUTO_BALANCE_OPTIONS", "/data/options.json"))
+
+
+def mobile_kit(path=None):
+    """App option ``messkoffer``: the device is the mobile Jodeit measuring kit that moves between customers.
+
+    Only then is the customer configuration itself neutralised after the retention period. Default off,
+    so a stationary installation (e.g. a private Home Assistant) never loses its room configuration."""
+    try:
+        return json.loads(Path(path or OPTIONS_FILE).read_text()).get("messkoffer") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def config_expired(last_change, jobs_left, expired_job_ends, now):
+    """Mobile kit: does the stored customer configuration belong only to expired data?
+
+    True if no job (running or stopped) is left and the configuration was last changed either before the end
+    of a job whose deadline has passed or more than RETENTION_DAYS ago. ``last_change`` None (no timestamp
+    anywhere) counts as expired because no remaining job can depend on it."""
+    if jobs_left:
+        return False
+    if last_change is None:
+        return True
+    return last_change + timedelta(days=RETENTION_DAYS) <= now or any(last_change <= end for end in expired_job_ends)
+
+
 REGISTER_DIR = Path(os.environ.get("AUTO_BALANCE_REGISTER_DIR", "/share/autobalance"))
 REGISTER_FILE = "geloeschte-messungen.json"
 

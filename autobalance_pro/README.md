@@ -43,11 +43,22 @@
   Löschprotokoll neu aufgebaut; ist `/share` nicht beschreibbar, zeigt die Übersicht einen Hinweis.
 - Fehler eines Löschlaufs bleiben in der Übersicht sichtbar (`GET api/v2/retention` → `status`), bis ein späterer
   Lauf erfolgreich war. Neuer Versuch stündlich.
+- **Messkoffer-Modus** (App-Option `messkoffer`, Standard `false`): Ist keine Messung mehr vorhanden und gehört die
+  Konfiguration nur zu abgelaufenen Messungen (oder ist sie seit 30 Tagen unverändert), werden Räume,
+  Fühlerzuordnung, Anlagenangaben, Konfigurationsverlauf und Messwerte außerhalb von Messungen automatisch entfernt,
+  ebenso in den lokalen App-Sicherungen. Eine laufende oder noch nicht abgelaufene Messung verhindert das.
+  Stationäre Installationen behalten ihre Konfiguration; dort ist „Messgerät für nächsten Kunden vorbereiten“ der Weg.
+- Beim Löschen einer Messung werden auch Messwerte außerhalb von Messungen von deren Fühlern entfernt, sofern die
+  aktuelle Konfiguration sie nicht mehr verwendet.
 - **Grenzen:** Home-Assistant-Sicherungen (vollständig oder App) enthalten den Datenstand zum Sicherungszeitpunkt;
   die App liest oder löscht sie nicht. Deren Aufbewahrung liegt beim Betreiber (Messkoffer: Betriebsprozess).
   Wird eine Vollsicherung inklusive `share` wiederhergestellt, gilt das Register dieses Zeitpunkts: abgelaufene
   Messungen werden beim Start erneut gelöscht, früher manuell gelöschte erscheinen bis zu ihrer ursprünglichen Frist
   wieder.
+- **Betriebsgrenze Messkoffer (bis zu einer technischen Lösung):** Keine HA-Vollwiederherstellung mit echten
+  Kundendaten ohne vorher extern verwahrte Liste der gelöschten Messungs-IDs (`/share/autobalance/…json`); nach
+  einer Wiederherstellung vor der nächsten Kundenmessung bereinigen und prüfen. HA-Sicherungen auf dem Messkoffer
+  dokumentiert der Techniker und ersetzt/löscht sie bei Fälligkeit gezielt (Betriebsanweisung in Outline).
 
 ## Änderungen in v0.4.0 (freigegeben 27.11.2026)
 

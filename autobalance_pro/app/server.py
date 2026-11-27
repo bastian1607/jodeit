@@ -475,9 +475,10 @@ def deleted_info(sid):
 
 def retention_state():
     with connect() as c:r=c.execute("SELECT last_run,last_ok,errors,register FROM retention_state WHERE id=1").fetchone()
-    if not r:return {"last_run":None,"last_ok":None,"errors":[],"register":None,"register_text":None}
-    return {"last_run":r[0],"last_ok":r[1],"errors":json.loads(r[2] or "[]"),"register":r[3],
-        "register_text":retention.REGISTER_STATUS_TEXT.get(r[3]) if r[3] else None}
+    mode={"mobile_kit":retention.mobile_kit()}
+    if not r:return dict(mode,last_run=None,last_ok=None,errors=[],register=None,register_text=None)
+    return dict(mode,last_run=r[0],last_ok=r[1],errors=json.loads(r[2] or "[]"),register=r[3],
+        register_text=retention.REGISTER_STATUS_TEXT.get(r[3]) if r[3] else None)
 
 def _set_state(**kw):
     with connect() as c:
@@ -500,7 +501,48 @@ def _deletion_targets(now):
     windows=[(r[1],r[2]) for r in rows if r[1] and r[2]]
     return ids,windows
 
-def sanitize_backup(path,now=None):
+def job_entities(sid):
+    """Entity ids configured in one job (start snapshot plus changes). Used to remove its loose samples."""
+    try:return set().union(*(wanted(cfg) for _,cfg in session_history(sid))) if get_session(sid) else set()
+    except Exception:return set()
+
+def _expired_job_ends(c):
+    return [coverage.parse(r[0]) for r in c.execute("SELECT ended_at FROM deletion_log WHERE reason='frist' AND ended_at IS NOT NULL")]
+
+def _last_change(c,tables):
+    """Newest configuration timestamp in a database (config history, else config_v2, else samples)."""
+    for table,column in (("config_history","at"),("config_v2","updated_at"),("samples","at")):
+        if table in tables:
+            v=c.execute(f"SELECT MAX({column}) FROM {table}").fetchone()[0]
+            if v:return coverage.parse(v)
+    return None
+
+def neutralize_config(now=None):
+    """Mobile kit only (review 8, P0): remove the customer configuration once it belongs only to expired data.
+
+    Replaces configuration and history by the empty configuration and removes all samples outside jobs and
+    the acquisition status. Never touches a running or remaining job. Returns True if something was removed."""
+    now=now or utcnow()
+    if not retention.mobile_kit():return False
+    with LOCK:
+        with connect() as c:
+            tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            jobs=c.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+            if not retention.config_expired(_last_change(c,tables),jobs,_expired_job_ends(c),now):return False
+            cfg_empty=load_v2()==model.empty()
+            loose=c.execute("SELECT COUNT(*) FROM samples WHERE session_id IS NULL").fetchone()[0]
+            if cfg_empty and not loose:return False
+            empty_cfg=model.empty()
+            c.execute("DELETE FROM samples WHERE session_id IS NULL")
+            c.execute("DELETE FROM config_history")
+            c.execute("DELETE FROM acquisition")
+            _write_config(c,empty_cfg)
+            c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(now.isoformat(),"neutralized",json.dumps(empty_cfg)))
+    log_event("config_neutralized",None)
+    logging.info("Messkoffer: Kundenkonfiguration nach Fristablauf entfernt")
+    return True
+
+def sanitize_backup(path,now=None,entities=()):
     """Remove deleted or expired jobs and expired loose data from one local app backup (review 7).
 
     The file is never judged by its modification time. Jobs are matched by id; for backups from
@@ -509,7 +551,7 @@ def sanitize_backup(path,now=None):
     ids,windows=_deletion_targets(now)
     limit=(now-timedelta(days=retention.LOOSE_DATA_DAYS)).isoformat()
     c=sqlite3.connect(str(path),timeout=10)
-    removed={"jobs":0,"samples":0}
+    removed={"jobs":0,"samples":0,"config":False}
     try:
         c.execute("PRAGMA secure_delete=ON")
         tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -529,20 +571,34 @@ def sanitize_backup(path,now=None):
             else:loose=""
             for st,en in windows:removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}at>=? AND at<=?",(st,en)).rowcount
             removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}at<?",(limit,)).rowcount
+            for eid in entities:   # loose samples of the deleted job's sensors (not part of its window)
+                removed["samples"]+=c.execute(f"DELETE FROM samples WHERE {loose}entity_id=?",(eid,)).rowcount
         if "config_history" in tables:
             for st,en in windows:c.execute("DELETE FROM config_history WHERE at>=? AND at<=?",(st,en))
+            newest=c.execute("SELECT MAX(id) FROM config_history").fetchone()[0]
+            c.execute("DELETE FROM config_history WHERE at<? AND id<>?",(limit,newest or -1))
         if "app_events" in tables:c.execute("DELETE FROM app_events WHERE at<?",(limit,))
+        if retention.mobile_kit():
+            with connect() as live:expired_ends=_expired_job_ends(live)
+            for st,en in windows:expired_ends.append(coverage.parse(en))   # jobs removed from this copy
+            jobs_left=c.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] if "sessions" in tables else 0
+            if retention.config_expired(_last_change(c,tables),jobs_left,expired_ends,now):
+                for table in ("config_v2","config","config_history","acquisition"):
+                    if table in tables:c.execute(f"DELETE FROM {table}")
+                if "samples" in tables:
+                    removed["samples"]+=c.execute("DELETE FROM samples"+(" WHERE session_id IS NULL" if "session_id" in {r[1] for r in c.execute("PRAGMA table_info(samples)")} else "")).rowcount
+                removed["config"]=True
         c.commit()
     finally:c.close()
     _compact(str(path))
     return removed
 
-def _sanitize_all_backups(now,errors):
+def _sanitize_all_backups(now,errors,entities=()):
     cleaned=0
     for f in _backup_files():
         try:
-            r=sanitize_backup(f,now)
-            cleaned+=1 if r["jobs"] or r["samples"] else 0
+            r=sanitize_backup(f,now,entities)
+            cleaned+=1 if r["jobs"] or r["samples"] or r["config"] else 0
         except Exception:
             logging.exception("Lokale App-Sicherung konnte nicht bereinigt werden")
             errors.append({"code":"backup","text":"Lokale App-Sicherung "+f.name+" konnte nicht bereinigt werden.","at":now.isoformat()})
@@ -558,14 +614,16 @@ def delete_session(sid,reason,now=None,compact=True):
         s=get_session(sid)
         if not s:raise ValueError("Messung nicht gefunden")
         if not s["ended_at"]:raise ValueError("Laufende Messung zuerst stoppen")
+        gone=job_entities(sid)-wanted(load_v2())   # sensors of this job the current configuration no longer uses
         with connect() as c:
             n=c.execute("DELETE FROM samples WHERE session_id=?",(sid,)).rowcount
+            for eid in gone:n+=c.execute("DELETE FROM samples WHERE session_id IS NULL AND entity_id=?",(eid,)).rowcount
             c.execute("DELETE FROM sessions WHERE id=?",(sid,))
             c.execute("INSERT INTO deletion_log(session_ref,deleted_at,reason,samples_deleted,backups_deleted,started_at,ended_at) VALUES(?,?,?,?,?,?,?)",
                 (sid,now.isoformat(),reason,n,0,s["started_at"],s["ended_at"]))
             log_id=c.execute("SELECT last_insert_rowid()").fetchone()[0]
         errors=[]
-        cleaned=_sanitize_all_backups(now,errors)
+        cleaned=_sanitize_all_backups(now,errors,gone)
         with connect() as c:c.execute("UPDATE deletion_log SET backups_deleted=? WHERE id=?",(cleaned,log_id))
         register=_sync_register(now)
         if errors:_set_state(errors=retention_state()["errors"]+errors)
@@ -601,15 +659,20 @@ def purge(now=None):
         except Exception:
             logging.exception("Bereinigung loser Daten fehlgeschlagen")
             errors.append({"code":"loose","text":"Messwerte außerhalb von Messungen konnten nicht bereinigt werden.","at":now.isoformat()})
+        neutralized=False
+        try:neutralized=neutralize_config(now)
+        except Exception:
+            logging.exception("Kundenkonfiguration konnte nicht entfernt werden")
+            errors.append({"code":"config","text":"Kundenkonfiguration konnte nach Fristablauf nicht entfernt werden.","at":now.isoformat()})
         cleaned=_sanitize_all_backups(now,errors)
-        if done or loose:
+        if done or loose or neutralized:
             try:_compact()
             except Exception:
                 logging.exception("Datenbank konnte nicht verdichtet werden")
                 errors.append({"code":"compact","text":"Gelöschte Daten konnten nicht physisch entfernt werden (VACUUM).","at":now.isoformat()})
         _sync_register(now)
         _set_state(last_run=now.isoformat(),errors=errors,**({} if errors else {"last_ok":now.isoformat()}))
-    return {"jobs":done,"loose_samples":loose,"backups_cleaned":cleaned,"errors":errors}
+    return {"jobs":done,"loose_samples":loose,"config_neutralized":neutralized,"backups_cleaned":cleaned,"errors":errors}
 
 def apply_register():
     """After an app-only restore: delete jobs again that were deleted before (register outside /data)."""

@@ -796,6 +796,7 @@ class MobileTests(V2Browser):
         row = self.page.locator("#session-history .job-row", has_text="Müller")
         expect(row).to_contain_text("(30 Tage nach Messende). HA-Sicherungen separat berücksichtigen.")
         expect(row).to_contain_text("Ablage in Kundenakte noch nicht bestätigt")
+        expect(self.page.locator("#retention-mode")).to_contain_text("Stationärer Betrieb")
         row.locator(".job-archive").click()
         expect(row.locator("#archive-confirm")).to_contain_text("in der Jodeit-Kundenakte gesichert wurden. Die Löschung am")
         row.locator("#archive-confirm .confirm-ok").click()
