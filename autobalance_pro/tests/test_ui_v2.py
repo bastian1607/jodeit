@@ -545,6 +545,26 @@ class MobileTests(V2Browser):
             self.shot(f"ab009-raum-{width}")
             self.page.get_by_role("button", name="Abbrechen").click()
 
+    def test_ab020_gap_and_outage_are_visible(self):
+        """AB-020 AC-01/02: historical gap is listed; a 70-minute outage turns the banner red."""
+        from datetime import timedelta
+        self.seed(rooms=("Wohnzimmer",))
+        now = datetime.now(timezone.utc)
+        times = [now - timedelta(hours=4) + timedelta(minutes=5 * i) for i in range(13)]       # 4 h … 3 h ago
+        times += [now - timedelta(hours=2) + timedelta(minutes=5 * i) for i in range(11)]      # 2 h … 70 min ago
+        with server.connect() as c:
+            c.executemany("INSERT INTO samples(at,entity_id,state,unit,valid,quality,source_at,normalized_value,normalized_unit) VALUES(?,?,?,?,?,?,?,?,?)",
+                          [(t.isoformat(), "sensor.wohnzimmer_t", "21", "°C", 1, "ok", t.isoformat(), 21, "°C") for t in times])
+        self.open()
+        expect(self.page.locator("#acquisition-status")).to_contain_text("seit über 60 Minuten unterbrochen")
+        self.tab("5 Prüfen & Messung")
+        gaps = self.page.locator("#dq-gaps .dq-gap")
+        expect(gaps).to_have_count(2)
+        expect(gaps.first).to_contain_text("keine Messung")
+        expect(gaps.nth(1)).to_contain_text("nicht erfasst (60 min)")
+        expect(self.page.locator("#dq-entities")).to_contain_text("sensor.wohnzimmer_t")
+        self.shot("ab020-messluecke")
+
 
 if __name__ == "__main__":
     unittest.main()
