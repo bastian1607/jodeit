@@ -217,3 +217,34 @@ class ServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DetectTests(unittest.TestCase):
+    """AB-022: profile proposal from existing HA entities (read-only)."""
+
+    def states(self, keys=None, drop=()):
+        out = {}
+        for sid, f in devices.entities({"profile": PROFILE, "source": "ha"}).items():
+            if (keys is None or f["key"] in keys) and f["key"] not in drop:
+                out[sid] = {"entity_id": sid, "state": "1"}
+        return out
+
+    def test_full_match_is_proposed(self):
+        r = devices.detect(self.states())
+        self.assertEqual(r["candidates"][0]["profile"], PROFILE)
+        self.assertTrue(r["candidates"][0]["proposed"])
+        self.assertEqual((r["candidates"][0]["found"], r["candidates"][0]["total"]), (30, 30))
+
+    def test_some_missing_non_core_fields_still_proposed(self):
+        r = devices.detect(self.states(drop=("hp_flow_tc1", "hp_return_tc0", "last_code")))
+        self.assertTrue(r["candidates"][0]["proposed"])
+
+    def test_missing_core_field_or_partial_match_is_not_proposed(self):
+        r = devices.detect(self.states(drop=("outdoor_damped",)))
+        self.assertFalse(r["candidates"][0]["proposed"])
+        self.assertEqual(r["candidates"][0]["core_missing"], ["outdoor_damped"])
+        r = devices.detect(self.states(keys=("outdoor", "flow", "curve_design", "curve_offset", "flow_target", "outdoor_damped")))
+        self.assertFalse(r["candidates"][0]["proposed"])     # 6 of 30
+
+    def test_nothing_found_no_candidates(self):
+        self.assertEqual(devices.detect({})["candidates"], [])

@@ -384,6 +384,11 @@ class API(BaseHTTPRequestHandler):
             return self.send_json(200,{"sources":devices.SOURCES,"write_enabled":devices.WRITE_ENABLED,
                 "profiles":[{"key":p["key"],"label":p["label"],"verified":p["verified"],"fields":len(p["fields"])} for p in devices.PROFILES.values()]})
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
+        if path=="/api/v2/heat-source/detect":
+            # AB-022: read-only match of existing HA entities against the profiles; stores nothing.
+            try:ha={x["entity_id"]:x for x in get_entities()}
+            except Exception:return self.send_json(503,{"error":"Home Assistant derzeit nicht erreichbar"})
+            return self.send_json(200,devices.detect(ha))
         if path=="/api/v2/export.csv":
             body=("\ufeff"+export_csv()).encode()
             self.send_response(200)
