@@ -50,7 +50,7 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(temp['valid'])
         self.assertFalse(server.latest_observations(self.now+timedelta(hours=1))[0]['valid'])
     def test_quality_reasons(self):
-        cases=[({'state':'NaN'},'invalid_number'),({'state':'inf'},'invalid_number'),({'state':'abc'},'invalid_number'),({'unit':'W'},'invalid_unit'),({'state':'9999'},'implausible'),({'state':'unknown'},'unknown'),({'state':'unavailable'},'unavailable'),({'source_at':None},'missing_timestamp'),({'source_at':'bad'},'missing_timestamp'),({'source_at':(self.now+timedelta(minutes=2)).isoformat()},'future_timestamp'),({'source_at':(self.now-timedelta(minutes=31)).isoformat()},'stale')]
+        cases=[({'state':'NaN'},'invalid_number'),({'state':'inf'},'invalid_number'),({'state':'abc'},'invalid_number'),({'unit':'W'},'invalid_unit'),({'state':'9999'},'implausible'),({'state':'unknown'},'unknown'),({'state':'unavailable'},'unavailable'),({'source_at':None},'missing_timestamp'),({'source_at':'bad'},'missing_timestamp'),({'source_at':(self.now+timedelta(minutes=2)).isoformat()},'future_timestamp'),({'source_at':(self.now-timedelta(minutes=31)).isoformat()},'ok')]
         for changes,expected in cases:
             with self.subTest(changes=changes):self.assertEqual(server.quality(self.entity(**changes),True,self.now)[0],expected)
         self.assertEqual(server.quality(self.entity(entity_id='binary_sensor.window',state='broken'),False,self.now)[0],'invalid_state')
@@ -105,7 +105,7 @@ class QualityTests(unittest.TestCase):
             c.execute('CREATE TABLE samples(id INTEGER PRIMARY KEY,at TEXT,entity_id TEXT,state TEXT,unit TEXT,valid INTEGER)')
             c.execute('INSERT INTO samples VALUES(1,?,?,?,?,?)',(self.now.isoformat(),'sensor.room','20','°C',1))
         server.setup();server.setup();self.save()
-        row=server.latest_observations(self.now)[0]
+        row=next(r for r in server.latest_observations(self.now) if r['entity_id']=='sensor.room')
         self.assertEqual(row['state'],'20')
         self.assertEqual(row['quality'],'unchecked')
         self.assertFalse(row['valid'])
@@ -120,6 +120,31 @@ class QualityTests(unittest.TestCase):
         raw[0]['last_updated']=self.now.isoformat()
         with patch.object(server,'TOKEN','test'),patch.object(server.urllib.request,'urlopen',return_value=Response()),patch.object(server.json,'load',return_value=raw):
             self.assertEqual(server.get_entities()[0]['source_at'],self.now.isoformat())
+    def test_ab027_unchanged_temperature_stays_valid(self):
+        unchanged=self.entity(source_at=(self.now-timedelta(hours=20)).isoformat())   # device reports on change only
+        self.assertEqual(server.quality(unchanged,True,self.now)[0],'ok')
+        self.sample([unchanged])
+        row=next(r for r in server.latest_observations(self.now) if r['entity_id']=='sensor.room')
+        self.assertTrue(row['valid'])
+        self.assertFalse(row['stale'])
+        self.assertTrue(row['unchanged_long'])                                         # neutral hint only
+        row=next(r for r in server.latest_observations(self.now+timedelta(minutes=31)) if r['entity_id']=='sensor.room')   # own acquisition stopped
+        self.assertTrue(row['stale'])
+        self.assertFalse(row['valid'])
+        self.assertEqual(server.quality(dict(unchanged,state='unavailable'),True,self.now)[0],'unavailable')
+    def test_ab027_old_stale_samples_reclassified_once_with_backup(self):
+        with server.connect() as c:
+            c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (self.now.isoformat(),'sensor.t','20.5','°C',0,(self.now-timedelta(hours=2)).isoformat(),'stale',20.5,'°C'))
+            c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,quality) VALUES(?,?,?,?,?,?)",(self.now.isoformat(),'sensor.t','unavailable','°C',0,'unavailable'))
+            c.execute("DELETE FROM schema_migrations WHERE kind='ab027_unchanged_valid'")
+        self.assertEqual(server.reclassify_unchanged_samples(),1)
+        with server.connect() as c:
+            rows=c.execute("SELECT quality,valid FROM samples WHERE entity_id='sensor.t' ORDER BY id").fetchall()
+            backup=c.execute("SELECT backup_path FROM schema_migrations WHERE kind='ab027_unchanged_valid'").fetchone()[0]
+        self.assertEqual(rows,[('ok',1),('unavailable',0)])
+        self.assertTrue(Path(backup).exists())
+        self.assertEqual(server.reclassify_unchanged_samples(),0)                         # once only
     def test_ab011_event_based_entities_are_not_aged_out(self):
         old=(self.now-timedelta(hours=7)).isoformat()
         contact=self.entity(entity_id='binary_sensor.window',state='off',unit='',source_at=old)
@@ -129,7 +154,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(server.quality(dict(contact,state='unknown'),False,self.now)[0],'unknown')
         status=self.entity(entity_id='sensor.verdichter',state='aus',unit='',source_at=old)
         self.assertEqual(server.quality(status,False,self.now)[0],'ok')
-        self.assertEqual(server.quality(self.entity(source_at=old),True,self.now)[0],'stale')   # temperatures still aged
+        self.assertEqual(server.quality(self.entity(source_at=old),True,self.now)[0],'ok')      # AB-027: unchanged, not stale
         self.sample([self.entity(),contact])
         rows={r['entity_id']:r for r in server.latest_observations(self.now)}
         self.assertTrue(rows['binary_sensor.window']['valid'])

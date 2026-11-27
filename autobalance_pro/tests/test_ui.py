@@ -105,7 +105,8 @@ class BrowserTests(unittest.TestCase):
         self.entities[0]['source_at'] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         server.sample()
         self.page.get_by_role('button', name='Aktualisieren', exact=True).click()
-        expect(self.page.locator('#sample-list')).to_contain_text('Veraltet')
+        expect(self.page.locator('#sample-list')).to_contain_text('Gültig')          # AB-027: unchanged value, not stale
+        expect(self.page.locator('#sample-list')).not_to_contain_text('Veraltet')
         self.entities[0]['state'] = 'unknown'
         server.sample()
         self.page.get_by_role('button', name='Aktualisieren', exact=True).click()

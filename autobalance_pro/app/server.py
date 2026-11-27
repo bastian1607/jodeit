@@ -13,7 +13,8 @@ TOKEN=os.environ.get("SUPERVISOR_TOKEN","")
 HA_URL=os.environ.get("HA_API_URL","http://supervisor/core/api/states")
 LOCK=threading.RLock()
 logging.basicConfig(level=logging.INFO)
-STALE_SECONDS=1800
+STALE_SECONDS=1800            # own acquisition only (AB-027)
+UNCHANGED_HINT_SECONDS=12*3600   # AB-027: unchanged temperature -> neutral hint, value stays valid
 ENTITY_PATTERN=re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 def connect():
     c=sqlite3.connect(DB,timeout=10)
@@ -43,11 +44,24 @@ def setup():
         # AB-013/AB-020: a measuring job (Messauftrag) delimits the evaluated time window per site.
         c.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, name TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT, planned_days INTEGER NOT NULL, rooms TEXT NOT NULL, note TEXT)")
     sync_config()
+    reclassify_unchanged_samples()
     with LOCK, connect() as c:
         if not c.execute("SELECT 1 FROM config_history LIMIT 1").fetchone():
             # Baseline for installations before AB-013: valid since the first stored sample.
             first=c.execute("SELECT MIN(at) FROM samples").fetchone()[0]
             c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(first or utcnow().isoformat(),"baseline",json.dumps(load_v2(),ensure_ascii=False)))
+
+def reclassify_unchanged_samples():
+    """AB-027: samples stored as 'stale' by the old 30-minute rule were valid unchanged values. Once, with backup."""
+    with connect() as c:
+        if c.execute("SELECT 1 FROM schema_migrations WHERE kind='ab027_unchanged_valid'").fetchone():return 0
+        n=c.execute("SELECT COUNT(*) FROM samples WHERE quality='stale' AND normalized_value IS NOT NULL").fetchone()[0]
+    path=backup_database("before-ab027") if n else None
+    with connect() as c:
+        c.execute("UPDATE samples SET quality='ok',valid=1 WHERE quality='stale' AND normalized_value IS NOT NULL")
+        c.execute("INSERT INTO schema_migrations(version,kind,applied_at,backup_path) VALUES(?,?,?,?)",(model.SCHEMA_VERSION,"ab027_unchanged_valid",utcnow().isoformat(),path))
+    if n:logging.info("AB-027: %s unveränderte Temperaturwerte als gültig eingestuft",n)
+    return n
 
 def backup_database(reason):
     """Consistent copy via the SQLite backup API (safe with WAL), stored next to the DB."""
@@ -207,7 +221,8 @@ def quality(e,is_temperature,now):
     age=age_seconds(e.get("source_at"),now)
     if age is None:return "missing_timestamp",normalized,unit
     if age < -60:return "future_timestamp",normalized,unit
-    if age > STALE_SECONDS:return "stale",normalized,unit
+    # AB-027: many sensors report only on change. A long-unchanged value is the current value, not stale.
+    # A failed sensor shows up as unavailable/unknown in Home Assistant; our own polling age is checked separately.
     return "ok",normalized,unit
 
 def acquisition_status(now=None):
@@ -261,8 +276,9 @@ def latest_observations(now=None):
         item["quality"]=item["quality"] or "unchecked"
         item["age_seconds"]=age_seconds(item["source_at"],now)
         sampled_age=age_seconds(item["at"],now)
-        report_stale=item["entity_id"] in temps and (item["age_seconds"] is None or item["age_seconds"]>STALE_SECONDS)
-        item["stale"]=report_stale or sampled_age is None or sampled_age>STALE_SECONDS  # own acquisition must be fresh for every entity
+        # AB-027: only our own acquisition can be stale. The HA report age means "unchanged since" (hint only).
+        item["unchanged_long"]=item["entity_id"] in temps and item["age_seconds"] is not None and item["age_seconds"]>UNCHANGED_HINT_SECONDS
+        item["stale"]=sampled_age is None or sampled_age>STALE_SECONDS
         item["valid"]=bool(item["valid"] and item["quality"]=="ok" and not item["stale"])
         observations.append(item)
     return observations
