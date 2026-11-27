@@ -806,7 +806,7 @@ function sampleHTML(x){
   const value=hasN?safe(Number(x.normalized_value).toLocaleString('de-DE',{maximumFractionDigits:2}))+' '+safe(x.normalized_unit):safe(x.state)+' '+safe(x.unit);
   const raw=hasN?'<div class="hint">Originalwert: '+safe(x.state)+' '+safe(x.unit)+'</div>':'';
   const same=x.unchanged_long?'<div class="hint unchanged-hint">Temperatur seit '+safe(dateText(x.source_at))+' unverändert gemeldet. Wert wird aktuell von Home Assistant geliefert; Sensoraktivität nicht separat bestätigt.'+(x.unchanged_check?' Vor einer fachlichen Heizkurvenbewertung Fühler manuell prüfen.':'')+'</div>':'';
-  return '<div class="item"><b>'+safe(x.entity_id)+'</b><div>'+value+'</div>'+raw+'<div class="tag '+(valid?'ok':'error')+'">'+safe(label)+'</div>'+same+'<div class="hint">Erfasst: '+safe(dateText(x.at))+' · Letzte Änderung laut HA: '+safe(dateText(x.source_at))+'</div></div>';
+  return '<div class="item"><b>'+safe(x.entity_id)+'</b><div>'+value+'</div>'+raw+'<div class="tag '+(valid?'ok':'error')+'">'+safe(label)+'</div>'+same+'<div class="hint">Erfasst: '+safe(dateText(x.at))+' · '+safe(x.source_at?{reported:'Letzte Meldung an Home Assistant',updated:'Letzte HA-Aktualisierung'}[x.source_at_kind]||'HA-Zeitstempel':'Aktualität der HA-Quelle nicht belegt')+(x.source_at?': '+safe(dateText(x.source_at)):'')+'</div></div>';
 }
 /* ---------- AB-020 Datenlücken ---------- */
 let dqData=null;
@@ -893,11 +893,21 @@ async function stopMeasurement(a){
   if(!confirm('Messung „'+a.name+'“ stoppen?\n\nAbschlussbericht für diesen Messauftrag wird auf dem Messgerät festgeschrieben. Die gesonderte Ablage in der Kundenakte muss bestätigt werden.'))return false;
   try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messung gestoppt. Bericht festgeschrieben, unter „Frühere Messungen“ abrufbar.');return true}catch(ex){notice(ex.message,true);return false}
 }
+/* Review 10: name the HA timestamp correctly; never claim a physical sensor report or a temperature change. */
+function ago(a){return a<120?'gerade eben':a<3600?'vor '+Math.round(a/60)+' min':'vor '+num1(a/3600)+' h'}
+function sourceTimeText(kind,a){
+  if(a===null||a===undefined)return 'Aktualität der HA-Quelle nicht belegt';
+  return (kind==='reported'?'letzte Meldung an Home Assistant ':kind==='updated'?'letzte HA-Aktualisierung ':'HA-Zeitstempel ')+ago(a);
+}
 function sensorFreshness(s){
   if(!s||s.quality==='no_data')return 'noch kein Messwert';
+  if(s.stale)return 'AutoBalance-Abfrage veraltet'+(s.poll_age_seconds!=null?' (zuletzt '+ago(s.poll_age_seconds)+')':'');
   if(!s.valid)return 'nicht verfügbar oder ungültig';
-  const a=s.age_seconds;const age=a===null||a===undefined?'Alter unbekannt':a<120?'gerade eben':a<3600?'vor '+Math.round(a/60)+' min':'vor '+num1(a/3600)+' h';
-  return num1(s.value)+' °C · '+age+(s.stale?' (veraltet)':'');
+  let t=num1(s.value)+' °C · '+sourceTimeText(s.source_at_kind,s.age_seconds);
+  if(s.poll_age_seconds!=null)t+=' · AutoBalance zuletzt erfolgreich abgefragt '+ago(s.poll_age_seconds);
+  if(s.unchanged_long)t+=' · Wert wird aktuell von Home Assistant geliefert; Sensoraktivität nicht separat bestätigt.';
+  if(s.unchanged_check)t+=' Vor einer fachlichen Heizkurvenbewertung Fühler manuell prüfen.';
+  return t;
 }
 let sessionsRender=0;
 async function renderSessions(){

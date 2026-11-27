@@ -133,6 +133,31 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(row['stale'])
         self.assertFalse(row['valid'])
         self.assertEqual(server.quality(dict(unchanged,state='unavailable'),True,self.now)[0],'unavailable')
+    def test_review10_ha_timestamp_kind(self):
+        fresh=(self.now-timedelta(minutes=1)).isoformat();old=(self.now-timedelta(hours=20)).isoformat()
+        e=server.ha_entity({"entity_id":"sensor.t","state":"20","attributes":{"unit_of_measurement":"°C"},
+                            "last_reported":fresh,"last_updated":old,"last_changed":old})
+        self.assertEqual((e["source_at"],e["source_at_kind"]),(fresh,"reported"))     # fresh report, value unchanged for 20 h
+        e=server.ha_entity({"entity_id":"sensor.t","state":"20","last_updated":old,"last_changed":old})
+        self.assertEqual((e["source_at"],e["source_at_kind"]),(old,"updated"))        # older HA without last_reported
+        e=server.ha_entity({"entity_id":"sensor.t","state":"20","last_changed":old})
+        self.assertEqual((e["source_at"],e["source_at_kind"]),(None,"unknown"))       # last_changed is never used
+    def test_review10_fresh_report_unchanged_value_no_hint(self):
+        changed=(self.now-timedelta(hours=36)).isoformat()
+        self.sample([self.entity(source_at=(self.now-timedelta(minutes=2)).isoformat(),source_at_kind='reported')])
+        row=next(r for r in server.latest_observations(self.now) if r['entity_id']=='sensor.room')
+        self.assertTrue(row['valid'])
+        self.assertEqual(row['source_at_kind'],'reported')
+        self.assertFalse(row['unchanged_long'])                                         # value may be unchanged 36 h; reported -> no hint
+        self.assertNotEqual(row['source_at'],changed)
+    def test_review10_flags_reach_room_status(self):
+        import monitoring
+        self.sample([self.entity(source_at=(self.now-timedelta(hours=26)).isoformat(),source_at_kind='reported')])
+        row=next(r for r in server.latest_observations(self.now+timedelta(minutes=2)) if r['entity_id']=='sensor.room')
+        s=monitoring._sensor('sensor.room',row)
+        self.assertTrue(s['valid'] and s['unchanged_long'] and s['unchanged_check'])
+        self.assertEqual(s['source_at_kind'],'reported')
+        self.assertEqual(s['poll_age_seconds'],120)
     def test_ab027_historical_stale_samples_stay_excluded(self):
         with server.connect() as c:
             c.execute("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit) VALUES(?,?,?,?,?,?,?,?,?)",

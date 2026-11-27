@@ -29,7 +29,7 @@ def setup():
         c.execute("CREATE INDEX IF NOT EXISTS samples_at ON samples(at)")
         # Additive migration: original raw values and existing rows remain intact.
         columns={row[1] for row in c.execute("PRAGMA table_info(samples)")}
-        for name,kind in (("source_at","TEXT"),("quality","TEXT"),("normalized_value","REAL"),("normalized_unit","TEXT")):
+        for name,kind in (("source_at","TEXT"),("quality","TEXT"),("normalized_value","REAL"),("normalized_unit","TEXT"),("source_at_kind","TEXT")):
             if name not in columns:c.execute(f"ALTER TABLE samples ADD COLUMN {name} {kind}")
         c.execute("CREATE TABLE IF NOT EXISTS acquisition (id INTEGER PRIMARY KEY CHECK(id=1), last_attempt TEXT, last_success TEXT, connected INTEGER, error TEXT)")
         # AB-008: schema v2 lives in its own table. The legacy `config` row is kept as a v1
@@ -178,7 +178,17 @@ def get_entities():
     request=urllib.request.Request(HA_URL,headers={"Authorization":"Bearer "+TOKEN,"Content-Type":"application/json"})
     with urllib.request.urlopen(request,timeout=15) as response:items=json.load(response)
     if not isinstance(items,list):raise RuntimeError("Home Assistant lieferte keine Entitätenliste")
-    return [{"entity_id":e.get("entity_id",""),"name":e.get("attributes",{}).get("friendly_name",e.get("entity_id","")),"state":e.get("state",""),"unit":e.get("attributes",{}).get("unit_of_measurement",""),"device_class":e.get("attributes",{}).get("device_class",""),"source_at":e.get("last_reported") or e.get("last_updated")} for e in items if isinstance(e,dict)]
+    return [ha_entity(e) for e in items if isinstance(e,dict)]
+def ha_entity(e):
+    """One HA state object. AB-027/Review 10: keep which HA timestamp ``source_at`` is.
+
+    ``last_reported`` = last report of the device to HA (also with an unchanged value), ``last_updated`` = last
+    state/attribute update (fallback for older HA). ``last_changed`` (real value change) is not used."""
+    attrs=e.get("attributes") or {}
+    kind="reported" if e.get("last_reported") else "updated" if e.get("last_updated") else "unknown"
+    return {"entity_id":e.get("entity_id",""),"name":attrs.get("friendly_name",e.get("entity_id","")),"state":e.get("state",""),
+        "unit":attrs.get("unit_of_measurement",""),"device_class":attrs.get("device_class",""),
+        "source_at":e.get("last_reported") or e.get("last_updated"),"source_at_kind":kind}
 def heat_source(d):
     return (_as_v2(d).get("building") or {}).get("heat_source") or {}
 def wanted(d):
@@ -260,23 +270,25 @@ def sample():
         for entity in desired:
             e=state.get(entity,{})
             code,normalized,unit=quality(e,entity in temps,now)
-            vals.append((at,entity,e.get("state","unavailable"),e.get("unit",""),int(code=="ok"),e.get("source_at"),code,normalized,unit,job))
+            vals.append((at,entity,e.get("state","unavailable"),e.get("unit",""),int(code=="ok"),e.get("source_at"),code,normalized,unit,job,e.get("source_at_kind")))
         with connect() as c:
-            c.executemany("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit,session_id) VALUES (?,?,?,?,?,?,?,?,?,?)",vals)
+            c.executemany("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit,session_id,source_at_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?)",vals)
             c.execute("INSERT INTO acquisition(id,last_attempt,last_success,connected,error) VALUES(1,?,?,1,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,connected=1,error=NULL",(at,at))
 
 def latest_observations(now=None):
     now=now or utcnow()
     cfg=load_v2();desired=wanted(cfg);temps=temperature_ids(cfg)
-    with connect() as c:rows=c.execute("SELECT entity_id,state,unit,valid,at,source_at,quality,normalized_value,normalized_unit FROM samples WHERE id IN (SELECT MAX(id) FROM samples GROUP BY entity_id) ORDER BY entity_id").fetchall()
+    with connect() as c:rows=c.execute("SELECT entity_id,state,unit,valid,at,source_at,quality,normalized_value,normalized_unit,source_at_kind FROM samples WHERE id IN (SELECT MAX(id) FROM samples GROUP BY entity_id) ORDER BY entity_id").fetchall()
     observations=[]
     for row in rows:
-        item=dict(zip(("entity_id","state","unit","valid","at","source_at","quality","normalized_value","normalized_unit"),row))
+        item=dict(zip(("entity_id","state","unit","valid","at","source_at","quality","normalized_value","normalized_unit","source_at_kind"),row))
+        item["source_at_kind"]=item["source_at_kind"] or "unknown"   # samples before review 10
         if item["entity_id"] not in desired:continue
         item["quality"]=item["quality"] or "unchecked"
         item["age_seconds"]=age_seconds(item["source_at"],now)
         sampled_age=age_seconds(item["at"],now)
-        # AB-027: only our own acquisition can be stale. The HA report age means "unchanged since" (hint only).
+        item["poll_age_seconds"]=sampled_age
+        # AB-027: only our own acquisition can be stale. An old HA report time is a reason to check, not a fault.
         unchanged=item["entity_id"] in temps and item["age_seconds"] is not None
         item["unchanged_long"]=unchanged and item["age_seconds"]>UNCHANGED_HINT_SECONDS
         item["unchanged_check"]=unchanged and item["age_seconds"]>UNCHANGED_CHECK_SECONDS
