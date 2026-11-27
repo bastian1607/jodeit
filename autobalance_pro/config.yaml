@@ -17,5 +17,9 @@ homeassistant_api: true
 map:
   - type: data
     read_only: false
-options: {}
-schema: {}
+  - type: share          # AB-026: deletion register outside the app's own backup (/share/autobalance)
+    read_only: false
+options:
+  messkoffer: false   # AB-026/Review 8: only the mobile measuring kit removes the customer configuration after the deadline
+schema:
+  messkoffer: bool

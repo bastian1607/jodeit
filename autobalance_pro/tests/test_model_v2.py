@@ -16,6 +16,9 @@ from urllib.request import Request, urlopen
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import model  # noqa: E402
 import server  # noqa: E402
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+RECENT = (_dt.now(_tz.utc) - _td(days=1)).replace(microsecond=0).isoformat()
 
 
 def v1_config():
@@ -244,7 +247,7 @@ class StorageTests(unittest.TestCase):
             c.execute("CREATE TABLE samples (id INTEGER PRIMARY KEY, at TEXT, entity_id TEXT, state TEXT, unit TEXT, valid INTEGER, source_at TEXT, quality TEXT, normalized_value REAL, normalized_unit TEXT)")
             c.execute("INSERT INTO config VALUES(1,?)", (json.dumps(cfg),))
             c.executemany("INSERT INTO samples(at,entity_id,state,unit,valid) VALUES(?,?,?,?,?)",
-                          [("2026-11-20T12:00:00+00:00", "sensor.wohnen_t", "20.5", "°C", 1)] * 50)
+                          [(RECENT, "sensor.wohnen_t", "20.5", "°C", 1)] * 50)   # recent: AB-026 purges loose data > 30 days
 
     def backups(self):
         folder = Path(server.DB).parent / "backups"
