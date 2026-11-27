@@ -1,5 +1,5 @@
 <!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jodeit AutoBalance Pro</title><style>
-:root{font:15px system-ui,-apple-system,Segoe UI,sans-serif;background:#f3f6f8;color:#203340}*{box-sizing:border-box}body{margin:0}header{background:#183c4a;color:white;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:10px}h1{font-size:22px;margin:0}header small{opacity:.8}main{max-width:1050px;margin:22px auto;padding:0 15px}.panel{background:white;border:1px solid #dce4e8;border-radius:13px;padding:20px;margin-bottom:16px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}button{cursor:pointer;background:#fff;border:1px solid #cbd6dc;padding:9px 13px;border-radius:8px;color:#253945;font:inherit}button.primary,.tabs .active{background:#126e66;color:white;border-color:#126e66}button.danger{color:#aa3030}button:disabled{opacity:.5;cursor:default}h2{font-size:19px;margin:0 0 12px}h3{font-size:16px}p,.hint{color:#5c6e79;line-height:1.5}.hint{font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.item{border:1px solid #dce4e8;border-radius:10px;margin:10px 0;padding:13px}label{font-size:13px;font-weight:600;display:block;margin:8px 0 4px}input,select{width:100%;min-width:0;border:1px solid #bacbd3;border-radius:7px;font:inherit;padding:9px;background:white}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.checks label{font-weight:400;border:1px solid #e0e7eb;padding:7px;border-radius:7px}.checks input{width:auto;margin-right:8px}.tag{font-size:12px;border-radius:20px;background:#e4f2ea;color:#175b4b;padding:4px 10px}.alert{background:#fff2da;border-radius:8px;padding:12px;margin-bottom:16px}.error{background:#fde4e4;color:#941f1f}.ok{background:#e1f4e9;color:#15583b}.hidden{display:none}.subtitle{font-size:12px;color:#6b7b85}.small{font-size:12px;color:#71818a}hr{border:0;border-top:1px solid #e3e8ed;margin:18px 0}@media(max-width:650px){header{display:block}.grid{grid-template-columns:1fr}.panel{padding:14px}main{margin:12px auto}}
+:root{font:15px system-ui,-apple-system,Segoe UI,sans-serif;background:#f3f6f8;color:#203340}*{box-sizing:border-box}body{margin:0}header{background:#183c4a;color:white;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:10px}h1{font-size:22px;margin:0}header small{opacity:.8}main{max-width:1050px;margin:22px auto;padding:0 15px}.panel{background:white;border:1px solid #dce4e8;border-radius:13px;padding:20px;margin-bottom:16px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}button{cursor:pointer;background:#fff;border:1px solid #cbd6dc;padding:9px 13px;border-radius:8px;color:#253945;font:inherit}button.primary,.tabs .active{background:#126e66;color:white;border-color:#126e66}button.danger{color:#aa3030}button:disabled{opacity:.5;cursor:default}h2{font-size:19px;margin:0 0 12px}h3{font-size:16px}p,.hint{color:#5c6e79;line-height:1.5}.hint{font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.item{border:1px solid #dce4e8;border-radius:10px;margin:10px 0;padding:13px}label{font-size:13px;font-weight:600;display:block;margin:8px 0 4px}input,select,textarea{width:100%;min-width:0;border:1px solid #bacbd3;border-radius:7px;font:inherit;padding:9px;background:white}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.checks label{font-weight:400;border:1px solid #e0e7eb;padding:7px;border-radius:7px}.checks input{width:auto;margin-right:8px}.tag{font-size:12px;border-radius:20px;background:#e4f2ea;color:#175b4b;padding:4px 10px}.alert{background:#fff2da;border-radius:8px;padding:12px;margin-bottom:16px}.error{background:#fde4e4;color:#941f1f}.ok{background:#e1f4e9;color:#15583b}.hidden{display:none}.subtitle{font-size:12px;color:#6b7b85}.small{font-size:12px;color:#71818a}hr{border:0;border-top:1px solid #e3e8ed;margin:18px 0}@media(max-width:650px){header{display:block}.grid{grid-template-columns:1fr}.panel{padding:14px}main{margin:12px auto}}
 /* Jodeit-inspired neutral presentation; exact brand values pending original assets */
 :root{background:#f5f5f4;color:#202124}
 header{background:#18191b;color:#fff}
@@ -68,7 +68,7 @@ details.card>.body{padding:0 12px 12px}
 <button data-tab="check">5 Prüfen &amp; Messung</button>
 </nav>
 
-<section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div class="grid" id="stats"></div>
+<section id="dashboard" class="panel tab"><h2>AutoBalance Übersicht</h2><div id="measurement-quick"></div><div class="grid" id="stats"></div>
 <div id="heat-snapshot"></div>
 <p>Beginne mit den Räumen: Name und Solltemperatur reichen. Überwacht werden nur Räume mit Temperaturfühler; drei gezielt platzierte Fühler sind das Basispaket. Heizlast, Heizkreise und Heizflächen kannst du später ergänzen.</p>
 <button class="primary" data-goto="rooms">Räume einrichten</button></section>
@@ -159,8 +159,8 @@ details.card>.body{padding:0 12px 12px}
 <div class="panel"><h2>A · Passive Messung</h2>
 <p class="hint">Die Messung läuft automatisch alle fünf Minuten, sobald einem Raum ein Temperaturfühler zugeordnet ist. Fehlende Heizlast-, Heizkreis- oder Heizkörperdaten halten sie nicht an.</p>
 <div id="measure-list"></div>
-<h3>Messauftrag</h3>
-<p class="hint">Ein Messauftrag grenzt den ausgewerteten Zeitraum je Einsatzort ab (Ziel ca. 7 Tage). Er speichert nur lokal und sendet nichts an Home Assistant oder die Wärmepumpe.</p>
+<h3>Messung</h3>
+<p class="hint">Eine Messung ordnet den Zeitraum einem Einsatz zu (Ziel ca. 7 Tage) und kann später als Bericht gedruckt werden. Sie speichert nur lokal und sendet nichts an Home Assistant oder die Wärmepumpe.</p>
 <div id="session-panel"></div>
 <div id="assessment"></div>
 <h3 id="dq-title">Messqualität · letzte 7 Tage</h3>
@@ -825,7 +825,7 @@ function durationText(ms){const h=ms/3600000;return h<48?Math.max(0,Math.round(h
 function coverageStat(){
   if(!dqData)return ['Abdeckung','–'];
   if(activeJob)return ['Abdeckung seit Messbeginn',pct(dqData.coverage)+' · '+durationText(Date.now()-new Date(activeJob.started_at).getTime())+' erfasst · Ziel: '+activeJob.planned_days+' Tage'];
-  return ['Abdeckung (max. 7 Tage, kein Messauftrag)',pct(dqData.coverage)];
+  return ['Abdeckung (max. 7 Tage, keine Messung aktiv)',pct(dqData.coverage)];
 }
 function dataQualityBanner(){
   if(!dqData||!['warning','critical'].includes(dqData.status))return;
@@ -877,11 +877,27 @@ async function renderHeatSnapshot(){
   root.append(rooms);
   const a=document.createElement('a');a.href='api/v2/export.csv';a.textContent='Messwerte der letzten 7 Tage als CSV herunterladen';a.setAttribute('download','');root.append(a);
 }
-/* ---------- AB-013 Messauftrag ---------- */
+/* ---------- AB-013/AB-024 Messungen: beginnen, stoppen, später drucken ---------- */
 let sessionsData=null;
+function roomListText(rooms){return (rooms.filter(r=>r.sensors?r.sensors.length:r.temperature_sensors.length).map(r=>r.name).join(', ')||'–')}
+function jobLinks(s){
+  const box=document.createElement('span');box.className='job-links';
+  const rep=document.createElement('a');rep.className='job-report';rep.href='api/v2/sessions/'+encodeURIComponent(s.id)+'/report';rep.target='_blank';rep.rel='noopener';rep.textContent='Bericht drucken';
+  const csv=document.createElement('a');csv.href='api/v2/sessions/'+encodeURIComponent(s.id)+'/export.csv';csv.setAttribute('download','');csv.textContent='CSV';
+  const show=document.createElement('button');show.type='button';show.textContent='Auswertung anzeigen';show.addEventListener('click',()=>{renderAssessment(s.id);el('assessment').scrollIntoView({block:'start'})});
+  box.append(rep,document.createTextNode(' · '),csv,document.createTextNode(' '),show);return box;
+}
+async function stopMeasurement(a){
+  if(!confirm('Messung „'+a.name+'“ stoppen? Der Bericht bleibt gespeichert und kann später gedruckt werden.'))return false;
+  try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messung gestoppt. Bericht unter „Frühere Messungen“.');return true}catch(ex){notice(ex.message,true);return false}
+}
+let sessionsRender=0;
 async function renderSessions(){
-  const root=el('session-panel');if(!root)return;root.replaceChildren();
-  try{sessionsData=await api('v2/sessions')}catch(_){root.textContent='Messaufträge derzeit nicht abrufbar.';return}
+  const root=el('session-panel');if(!root)return;
+  const run=++sessionsRender;   // overlapping calls: only the latest one renders
+  let data;try{data=await api('v2/sessions')}catch(_){if(run===sessionsRender)root.textContent='Messungen derzeit nicht abrufbar.';return}
+  if(run!==sessionsRender)return;
+  sessionsData=data;root.replaceChildren();
   const a=sessionsData.active;
   if(a){
     const box=document.createElement('div');box.className='item';box.id='session-active';
@@ -889,47 +905,80 @@ async function renderSessions(){
     const days=Math.floor((Date.now()-new Date(a.started_at).getTime())/86400000)+1;
     const p=document.createElement('p');p.textContent='Läuft seit '+dateText(a.started_at)+' · Tag '+Math.min(days,a.planned_days)+' von '+a.planned_days+(days>a.planned_days?' (geplante Dauer überschritten)':'')+'.';
     const rooms=document.createElement('p');rooms.className='hint';
-    rooms.textContent='Überwacht: '+(a.rooms.filter(r=>r.sensors.length).map(r=>r.name).join(', ')||'–')+' · nicht überwacht: '+(a.rooms.filter(r=>!r.sensors.length).map(r=>r.name).join(', ')||'–');
-    const stop=document.createElement('button');stop.id='session-stop';stop.textContent='Messauftrag beenden';
-    stop.addEventListener('click',async()=>{if(!confirm('Messauftrag „'+a.name+'“ beenden? Die Messung selbst läuft weiter.'))return;
-      try{await api('v2/sessions/stop','POST',{id:a.id});notice('Messauftrag beendet.');renderSessions()}catch(ex){notice(ex.message,true)}});
-    box.append(badge('Messauftrag läuft','good'),b,p,rooms,stop);root.append(box);
+    rooms.textContent='Gemessen: '+roomListText(a.rooms)+' · nicht überwacht: '+(a.rooms.filter(r=>!r.sensors.length).map(r=>r.name).join(', ')||'–');
+    box.append(badge('Messung läuft','good'),document.createTextNode(' '),b,p);
+    if(a.note){const n=document.createElement('p');n.className='hint';n.textContent='Notiz: '+a.note;box.append(n)}
+    const stop=document.createElement('button');stop.id='session-stop';stop.className='danger';stop.textContent='Messung stoppen';
+    stop.addEventListener('click',async()=>{if(await stopMeasurement(a)){renderSessions();stats()}});
+    box.append(rooms,jobLinks(a),document.createElement('br'),stop);root.append(box);
   }else{
     const form=document.createElement('div');form.className='item';form.id='session-form';
     const monitored=cfg.rooms.filter(r=>r.temperature_sensors.length),others=cfg.rooms.filter(r=>!r.temperature_sensors.length);
-    const help=document.createElement('p');help.className='hint';help.textContent=(roomsData?.help||'')+' Die Auswahl ist ein Vorschlag, keine Pflicht.';
-    const sel=document.createElement('p');sel.textContent=monitored.length+' von '+cfg.rooms.length+' Räumen ausgewählt'+(others.length?'; '+others.length+' Räume werden nicht direkt überwacht ('+others.map(r=>r.name).join(', ')+')':'')+'.';
+    const nl=document.createElement('label');nl.htmlFor='session-name';nl.textContent='Bezeichnung (Freitext, z. B. Name, Auftrag oder Angebot)';
+    const name=document.createElement('input');name.id='session-name';name.maxLength=120;name.placeholder='z. B. Müller · Angebot 2026-123';name.autocomplete='off';
+    const tl=document.createElement('label');tl.htmlFor='session-note';tl.textContent='Notiz, optional';
+    const note=document.createElement('textarea');note.id='session-note';note.maxLength=1000;note.rows=2;
+    const dl=document.createElement('label');dl.htmlFor='session-days';dl.textContent='Geplante Dauer in Tagen';
+    const days=document.createElement('input');days.id='session-days';days.inputMode='numeric';days.value='7';
+    const sel=document.createElement('p');sel.className='hint';sel.textContent='Gemessen werden '+monitored.length+' von '+cfg.rooms.length+' Räumen'+(others.length?'; nicht überwacht: '+others.map(r=>r.name).join(', '):'')+'. '+(roomsData?.help||'');
     const hintList=document.createElement('ul');
     for(const r of cfg.rooms){const h=roomsData?.hints?.[r.id]||[];if(!h.length)continue;const li=document.createElement('li');li.textContent=r.name+': '+h.join(' · ');hintList.append(li)}
-    const name=document.createElement('input');name.id='session-name';name.maxLength=80;name.placeholder='Bezeichnung, z. B. Pilot Anlage 1 (ohne Kundennamen)';
-    const days=document.createElement('input');days.id='session-days';days.inputMode='numeric';days.value='7';
-    const dl=document.createElement('label');dl.htmlFor='session-days';dl.textContent='Geplante Dauer in Tagen';
-    const nl=document.createElement('label');nl.htmlFor='session-name';nl.textContent='Bezeichnung des Messauftrags';
-    const cl=document.createElement('label');cl.className='check-row';const cb=document.createElement('input');cb.type='checkbox';cb.id='session-confirm';
-    cl.append(cb,document.createTextNode(' Auswahl der Messräume geprüft und bestätigt'));
-    const start=document.createElement('button');start.className='primary';start.id='session-start';start.textContent='Messauftrag starten';
+    const start=document.createElement('button');start.className='primary';start.id='session-start';start.textContent='Messung beginnen';
     start.disabled=!monitored.length;
     start.addEventListener('click',async()=>{
-      const d=Number(days.value);
-      try{await api('v2/sessions/start','POST',{name:name.value.trim(),planned_days:Number.isInteger(d)?d:NaN,confirmed:cb.checked});notice('Messauftrag gestartet.');renderSessions();stats()}
-      catch(ex){notice('Messauftrag nicht gestartet: '+ex.message,true)}});
-    form.append(help,sel);if(hintList.children.length)form.append(hintList);
-    form.append(nl,name,dl,days,cl,start);
-    if(!monitored.length){const w=document.createElement('p');w.className='warn-box';w.textContent='Für einen Messauftrag mindestens einem Raum einen Temperaturfühler zuordnen.';form.append(w)}
+      const n=name.value.trim(),d=Number(days.value);
+      if(!n){notice('Bitte eine Bezeichnung eingeben (z. B. Name oder Auftrag).',true);name.focus();return}
+      // The click on this dialog is the installer's confirmation of the measuring rooms (AC-013-14).
+      if(!confirm('Messung „'+n+'“ beginnen?\n\nGemessen: '+(monitored.map(r=>r.name).join(', ')||'–')+'\nNicht überwacht: '+(others.map(r=>r.name).join(', ')||'–')))return;
+      try{await api('v2/sessions/start','POST',{name:n,note:note.value.trim(),planned_days:Number.isInteger(d)?d:NaN,confirmed:true});notice('Messung „'+n+'“ läuft.');renderSessions();stats()}
+      catch(ex){notice('Messung nicht begonnen: '+ex.message,true)}});
+    form.append(nl,name,tl,note,dl,days,sel);if(hintList.children.length)form.append(hintList);form.append(start);
+    if(!monitored.length){const w=document.createElement('p');w.className='warn-box';w.textContent='Für eine Messung mindestens einem Raum einen Temperaturfühler zuordnen.';form.append(w)}
     root.append(form);
   }
   const target=a||sessionsData.sessions[0];
   if(target)await renderAssessment(target.id);else el('assessment').replaceChildren();
+  if(run!==sessionsRender)return;
   const done=sessionsData.sessions.filter(s=>s.ended_at);
-  if(done.length){const h=document.createElement('p');h.className='hint';h.textContent='Beendete Messaufträge: '+done.map(s=>s.name+' ('+dateText(s.started_at)+' – '+dateText(s.ended_at)+')').join('; ');root.append(h)}
+  const h=document.createElement('h3');h.textContent='Frühere Messungen';root.append(h);
+  const list=document.createElement('div');list.id='session-history';
+  if(!done.length){const p=document.createElement('p');p.className='hint';p.textContent='Noch keine abgeschlossene Messung.';list.append(p)}
+  for(const s of done){const row=document.createElement('div');row.className='item';
+    const b=document.createElement('b');b.textContent=s.name;
+    const p=document.createElement('div');p.className='subtitle';p.textContent=dateText(s.started_at)+' – '+dateText(s.ended_at)+(s.note?' · '+s.note:'');
+    row.append(b,p,jobLinks(s));list.append(row)}
+  root.append(list);
+}
+/* Übersicht: Messung direkt beginnen oder stoppen */
+async function renderQuickMeasurement(){
+  const root=el('measurement-quick');if(!root)return;
+  let d;try{d=await api('v2/sessions')}catch(_){return}
+  root.replaceChildren();   // replace only after the await: overlapping calls cannot duplicate the box
+  const box=document.createElement('div');box.className='item row';
+  if(d.active){
+    const t=document.createElement('span');t.textContent='Messung läuft: '+d.active.name+' · seit '+dateText(d.active.started_at);
+    const stop=document.createElement('button');stop.className='danger';stop.id='quick-stop';stop.textContent='Messung stoppen';
+    stop.addEventListener('click',async()=>{if(await stopMeasurement(d.active))stats()});
+    box.append(t,stop);
+  }else{
+    const t=document.createElement('span');t.textContent='Keine Messung aktiv.';
+    const go=document.createElement('button');go.className='primary';go.id='quick-start';go.textContent='Messung beginnen';
+    go.addEventListener('click',async()=>{if(tab('check')){await renderSessions();el('session-name')?.focus();el('session-panel').scrollIntoView({block:'start'})}});
+    box.append(t,go);
+  }
+  root.append(box);
 }
 /* ---------- AB-014 Aussagekraft des Messauftrags (nur lesend) ---------- */
 const STAGE_KIND={no_data:'warn',insufficient:'bad',level:'warn',level_and_slope:'good'};
 const DIST_TEXT={dhw:'Warmwasser',defrost:'Abtauung',heating_off:'kein Heizbetrieb',change:'Parameter-/Sollwertänderung',window:'Fenster offen'};
 function num1(v){return v===null||v===undefined?'–':Number(v).toLocaleString('de-DE',{maximumFractionDigits:1})}
+let assessmentRender=0;
 async function renderAssessment(id){
-  const root=el('assessment');if(!root)return;root.replaceChildren();
-  let r;try{r=await api('v2/sessions/'+encodeURIComponent(id)+'/assessment')}catch(_){root.textContent='Auswertung derzeit nicht abrufbar.';return}
+  const root=el('assessment');if(!root)return;
+  const run=++assessmentRender;
+  let r;try{r=await api('v2/sessions/'+encodeURIComponent(id)+'/assessment')}catch(_){if(run===assessmentRender)root.textContent='Auswertung derzeit nicht abrufbar.';return}
+  if(run!==assessmentRender)return;
+  root.replaceChildren();
   const h=document.createElement('h3');h.textContent='Heizkurvenbewertung fachlich möglich? · '+r.session.name;root.append(h);
   const head=document.createElement('div');head.className='item';head.id='assessment-stage';
   head.append(badge(r.stage_text,STAGE_KIND[r.stage]));
@@ -951,15 +1000,16 @@ async function renderAssessment(id){
   root.append(rooms);
   const links=document.createElement('div');links.className='actions';
   const rep=document.createElement('a');rep.id='report-link';rep.href='api/v2/sessions/'+encodeURIComponent(id)+'/report';rep.target='_blank';rep.rel='noopener';rep.textContent='Messbericht öffnen (druckbar)';
-  const csv=document.createElement('a');csv.href='api/v2/sessions/'+encodeURIComponent(id)+'/export.csv';csv.setAttribute('download','');csv.textContent='Messwerte dieses Messauftrags (CSV)';
+  const csv=document.createElement('a');csv.href='api/v2/sessions/'+encodeURIComponent(id)+'/export.csv';csv.setAttribute('download','');csv.textContent='Messwerte dieser Messung (CSV)';
   links.append(rep,document.createTextNode(' · '),csv);root.append(links);
   const note=document.createElement('p');note.className='hint';note.textContent='Pilotregelwerk (Schwellen noch im Feld zu bestätigen). AutoBalance berechnet keine Parameteränderung und schreibt nichts an die Wärmepumpe.';root.append(note);
 }
 async function stats(){
   try{const m=await api('overview');acquisitionStatus(m.acquisition||{});
     await loadDataQuality();dataQualityBanner();
-    el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)],coverageStat(),['Fachliche Aussagekraft',activeJob?'Siehe Schritt 5 · Messauftrag':'Kein Messauftrag'],['Messlücken',dqData?dqData.gaps.length:'–']].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
+    el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)],coverageStat(),['Fachliche Aussagekraft',activeJob?'Siehe Schritt 5 · Messung':'Keine Messung aktiv'],['Messlücken',dqData?dqData.gaps.length:'–']].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
     renderDataQuality();
+    await renderQuickMeasurement();
     await renderHeatSnapshot();
   }catch(ex){acquisitionUnavailable()}
 }
