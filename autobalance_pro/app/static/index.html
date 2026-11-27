@@ -999,7 +999,8 @@ async function renderAssessment(id){
   root.replaceChildren();
   const h=document.createElement('h3');h.textContent='Heizkurvenbewertung fachlich möglich? · '+r.session.name;root.append(h);
   const head=document.createElement('div');head.className='item';head.id='assessment-stage';
-  head.append(badge(r.stage_text,STAGE_KIND[r.stage]));
+  head.append(badge(r.stage_text,r.restricted?'warn':STAGE_KIND[r.stage]));
+  if(r.restricted)head.append(document.createTextNode(' '),Object.assign(badge(r.restricted_label,'warn'),{id:'assessment-restricted'}));
   if(r.disturbance_notice){const w=document.createElement('p');w.className='warn-box';w.id='assessment-disturbance';w.textContent=r.disturbance_notice;head.append(w)}
   const facts=document.createElement('p');
   facts.textContent='Messdauer '+num1(r.window.hours)+' h von geplant '+r.window.planned_days+' Tagen · technisch auswertbare Nächte: '+(r.technical_nights??r.valid_nights)+' · davon Heizbetrieb bestätigt: '+r.valid_nights+' · verwertbare Stunden: '+num1(r.valid_hours)+

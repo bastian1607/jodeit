@@ -67,7 +67,7 @@ table{{border-collapse:collapse;width:100%;margin:6px 0}}th,td{{border:1px solid
         [[e(session['name']), _t(session['started_at'], tz), _t(session['ended_at'], tz) if session.get('ended_at') else "–",
           _n(w['hours'], 1, 'h'), f"{w['planned_days']} Tage", e(status)]])}
 {('<p><b>Notiz:</b> ' + e(session['note']).replace(chr(10), '<br>') + '</p>') if session.get('note') else ''}
-<div class="result {STAGE_CLASS[stage]}" id="report-result">{e(result['stage_text'])}</div>"""]
+<div class="result {'warn' if result.get('restricted') else STAGE_CLASS[stage]}" id="report-result">{e((result['restricted_label'] + ': ') if result.get('restricted') else '')}{e(result['stage_text'])}</div>"""]
     if result.get("disturbance_notice"):
         parts.append(f'<p class="warn" id="report-disturbance">{e(result["disturbance_notice"])}</p>')
     for text in assessment.report_text(result, lambda iso: _t(iso, tz)):
