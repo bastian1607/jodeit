@@ -68,7 +68,7 @@ class ReportTests(unittest.TestCase):
         p = Plant(days=4)
         self.store(p)
         html = server.session_report(self.job["id"], now=p.end)
-        self.assertIn("Heizbetrieb nicht bestätigt", html)        # HA-only config, AC6-02
+        self.assertIn("Heizbetrieb nicht nachgewiesen", html)      # HA-only config, AC6-02
         self.assertIn("läuft noch – Ergebnis vorläufig", html)
         self.assertIn("Vorläufiger Bericht einer laufenden Messung", html)
         self.assertIn("Keine Messlücken über 15 Minuten", html)

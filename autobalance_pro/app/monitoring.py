@@ -32,7 +32,8 @@ def _sensor(entity_id, observation):
         return {"entity_id": entity_id, "value": None, "quality": "no_data", "valid": False}
     value = observation.get("normalized_value")
     return {"entity_id": entity_id, "value": value, "quality": observation.get("quality") or "unchecked",
-            "valid": bool(observation.get("valid") and value is not None), "stale": bool(observation.get("stale"))}
+            "valid": bool(observation.get("valid") and value is not None), "stale": bool(observation.get("stale")),
+            "age_seconds": observation.get("age_seconds")}
 
 
 def room_status(room, observations):

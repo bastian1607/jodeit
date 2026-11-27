@@ -68,6 +68,8 @@ table{{border-collapse:collapse;width:100%;margin:6px 0}}th,td{{border:1px solid
           _n(w['hours'], 1, 'h'), f"{w['planned_days']} Tage", e(status)]])}
 {('<p><b>Notiz:</b> ' + e(session['note']).replace(chr(10), '<br>') + '</p>') if session.get('note') else ''}
 <div class="result {STAGE_CLASS[stage]}" id="report-result">{e(result['stage_text'])}</div>"""]
+    if result.get("disturbance_notice"):
+        parts.append(f'<p class="warn" id="report-disturbance">{e(result["disturbance_notice"])}</p>')
     for text in assessment.report_text(result, lambda iso: _t(iso, tz)):
         parts.append(f"<p>{e(text)}</p>")
     if result["reasons"]:
@@ -77,15 +79,19 @@ table{{border-collapse:collapse;width:100%;margin:6px 0}}th,td{{border:1px solid
 
     band = result["outdoor_band"]
     parts.append("<h2>Außentemperatur und geeignete Nächte</h2>")
-    parts.append(f"<p>Geeignete Nächte im aktuellen Auswertungsabschnitt: <b>{result['valid_nights']}</b> · "
+    technical = result.get("technical_nights", result["valid_nights"])     # frozen pre-review results lack the key
+    parts.append(f"<p>Technisch auswertbare Nächte im aktuellen Auswertungsabschnitt: <b>{technical}</b> · "
+                 f"davon Heizbetrieb bestätigt: <b>{result['valid_nights']}</b> · "
                  f"verwertbare Stunden: <b>{_n(result['valid_hours'])}</b> · Außentemperatur "
                  f"({'gedämpft, regelungsrelevant' if band['damped'] else 'ungedämpft'}) in geeigneten Nächten: "
                  f"{_n(band['min'], 1, '°C')} bis {_n(band['max'], 1, '°C')} (Spanne {_n(band['span_k'], 1, 'K')}).</p>")
     if band.get("raw_minus_damped_median_k") is not None:
         parts.append(f"<p class=\"hint\">Ungedämpfte minus gedämpfte Außentemperatur (Median): "
                      f"{_n(band['raw_minus_damped_median_k'], 1, 'K')}.</p>")
-    parts.append(_table(["Nacht", "Geeignet", "Verwertbar", "Außen (Median)", "Fehlende Slots", "Störungen"],
-                        [[_t(n["date"] + "T12:00:00+00:00", tz, False), "ja" if n["valid"] else "nein", _n(n["ok_hours"], 1, "h"),
+    parts.append(_table(["Nacht", "Technisch auswertbar", "Heizbetrieb bestätigt", "Verwertbar", "Außen (Median)", "Fehlende Slots", "Störungen"],
+                        [[_t(n["date"] + "T12:00:00+00:00", tz, False), "ja" if n["valid"] else "nein",
+                          ("–" if not n["valid"] or "heating_verified" not in n else "ja" if n["heating_verified"] else "nicht nachgewiesen"),
+                          _n(n["ok_hours"], 1, "h"),
                           _n(n["outdoor_median"], 1, "°C"), _pct(n["missing_share"]),
                           e(", ".join(DIST_TEXT.get(d, d) for d in n["disturbances"]) or "–")] for n in result["nights"]]))
 
