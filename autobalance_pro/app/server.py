@@ -330,6 +330,39 @@ def heat_source_snapshot(now=None):
         "source":source.get("source"),"source_errors":HEAT_SOURCE_STATUS["errors"] if source.get("source")=="emsesp_rest" else {},
         "fields":items,"rooms":rooms,"read_only":True}
 
+AUTOFILL_STATUS={"at":None,"report":None}
+
+def autofill_from_source(now=None):
+    """AB-029: take over everything the read device profile delivers into empty configuration fields.
+
+    Read-only towards the device. Writes the configuration only when something changes (history kind
+    'autofill'). Values come from the app's own latest valid readings of the profile entities."""
+    now=now or utcnow()
+    with LOCK:
+        cfg=load_v2();source=heat_source(cfg)
+        if not devices.profile(source.get("profile")):return None
+        obs={o["entity_id"]:o for o in latest_observations(now)}
+        values={}
+        for sid,f in devices.entities(source).items():
+            o=obs.get(sid)
+            if o and o["valid"] and o["state"] not in ("unavailable","unknown",""):
+                values[f["key"]]={"entity_id":sid,"value":o["normalized_value"] if o.get("normalized_value") is not None else o["state"]}
+        before=json.dumps(cfg,sort_keys=True)
+        cfg,report=devices.autofill(cfg,values,local_date(now))
+        AUTOFILL_STATUS.update(at=now.isoformat(),report=report)
+        if json.dumps(cfg,sort_keys=True)==before:return report
+        cfg=model.validate(cfg)
+        with connect() as c:
+            _write_config(c,cfg)
+            c.execute("INSERT INTO config_history(at,kind,value) VALUES(?,?,?)",(now.isoformat(),"autofill",json.dumps(cfg,ensure_ascii=False)))
+            c.execute("DELETE FROM acquisition")
+    logging.info("AB-029: Anlagendaten übernommen: %s",", ".join(report["filled"]+report["refreshed"]) or "-")
+    return report
+
+def local_date(now):
+    try:return now.astimezone(plant_timezone()).strftime("%d.%m.%Y")
+    except Exception:return now.strftime("%d.%m.%Y")
+
 def entity_labels(cfg):
     labels={sid:f["label"] for sid,f in devices.entities(heat_source(cfg)).items()}
     for r in cfg["rooms"]:
@@ -890,6 +923,8 @@ def loop(interval=300):
     while not STOP.is_set():
         try:sample()
         except Exception:logging.exception("Lokale Messwerterfassung fehlgeschlagen")
+        try:autofill_from_source()          # AB-029: also refreshes values the app filled itself
+        except Exception:logging.exception("Anlagendaten konnten nicht übernommen werden")
         if time.monotonic()-last_purge>=retention.PURGE_INTERVAL_SECONDS:
             last_purge=time.monotonic()
             try:purge()
@@ -950,6 +985,7 @@ class API(BaseHTTPRequestHandler):
             return self.send_json(200,{"sources":devices.SOURCES,"write_enabled":devices.WRITE_ENABLED,
                 "profiles":[{"key":p["key"],"label":p["label"],"verified":p["verified"],"fields":len(p["fields"])} for p in devices.PROFILES.values()]})
         if path=="/api/v2/heat-source/latest":return self.send_json(200,heat_source_snapshot())
+        if path=="/api/v2/heat-source/autofill":return self.send_json(200,AUTOFILL_STATUS)
         if path=="/api/v2/rooms/status":return self.send_json(200,rooms_status())
         if path=="/api/v2/sessions":return self.send_json(200,dict(list_sessions(),retention=retention_state()))
         if path.startswith("/api/v2/sessions/") and path.count("/")==5:
@@ -1034,7 +1070,13 @@ class API(BaseHTTPRequestHandler):
                 return self.send_json(200,{"shares":shares,"reason":reason})
             if path=="/api/config":save_v1(data)
             else:save_v2(data)
-            return self.send_json(200,{"saved":True})
+            report=None
+            if path=="/api/v2/config" and devices.profile(heat_source(load_v2()).get("profile")):
+                try:
+                    sample()                       # read the profile values now, not in up to 5 minutes
+                    report=autofill_from_source()  # AB-029: take over what the device delivers
+                except Exception:logging.exception("Anlagendaten konnten nicht übernommen werden")
+            return self.send_json(200,{"saved":True,"autofill":report})
         except (ValueError,TypeError,KeyError,OverflowError,AttributeError) as exc:return self.send_json(400,{"error":str(exc)})
 def main(port=None,install_signals=True,ready=None):
     """Run acquisition and HTTP API; return 0 after an orderly SIGTERM/SIGINT shutdown (AB-010)."""

@@ -266,3 +266,117 @@ def detect(ha_states):
                         "proposed": not core_missing and r["found"] >= DETECT_SHARE * r["total"]})
     results.sort(key=lambda x: (x["proposed"], x["found"]), reverse=True)
     return {"candidates": [x for x in results if x["found"]], "read_only": True}
+
+
+# --------------------------------------------------------------------- AB-029 automatic take-over
+# Configuration fields that can be filled from a read device profile. Only empty fields are filled;
+# a value the app filled itself is refreshed when the device changes, a value the user set is never
+# overwritten. Nothing is written to the device (read-only).
+AUTOFILL_ENTITIES = (            # (path, profile field) - only for source "ha": these are HA entity ids
+    ("building.entities.outdoor", "outdoor"),
+    ("building.entities.dhw", "dhw_charging"),
+    ("circuit.entities.flow", "flow"),
+    ("circuit.entities.flow_target", "flow_target"),
+    ("circuit.entities.return", "return"),
+    ("circuit.entities.pump", "heating_pump"),
+)
+HEATING_TYPE_MAP = {"radiator": "radiators", "floor": "underfloor", "floorheating": "underfloor"}
+CURVE_PARAMS = ("curve_design", "curve_base", "curve_offset", "curve_max", "min_ext", "room_set",
+                "hp_min_flow", "control_mode", "room_influence", "solar_influence")
+PROFILE_MANUFACTURER = {"buderus-emsesp-hmc310": "Buderus"}
+AUTOFILL_LABELS = {
+    "building.entities.outdoor": "Außentemperatur (Entität)",
+    "building.entities.dhw": "Warmwasserbereitung (Entität)",
+    "circuit.entities.flow": "Heizkreis Vorlauf (Entität)",
+    "circuit.entities.flow_target": "Heizkreis Vorlauf-Soll (Entität)",
+    "circuit.entities.return": "Heizkreis Rücklauf (Entität)",
+    "circuit.entities.pump": "Heizkreispumpe (Entität)",
+    "building.heat_pump.manufacturer": "Hersteller Wärmepumpe",
+    "building.heating_system": "Heizsystem",
+    "circuit.emitter_type": "Heizflächenart Heizkreis",
+    "circuit.heating_curve.manufacturer_params": "Heizkurve laut Regler",
+    "circuit.heating_curve.reference": "Quelle Heizkurve",
+    "building.design_outdoor_c": "Minimale Außentemperatur laut Regler",
+    "building.design_outdoor_reference": "Quelle minimale Außentemperatur",
+}
+
+
+def _target(cfg, path):
+    head, *rest = path.split(".")
+    node = cfg["building"] if head == "building" else (cfg["circuits"][0] if cfg.get("circuits") else None)
+    for key in rest[:-1]:
+        node = node.get(key) if isinstance(node, dict) else None
+    return node, rest[-1]
+
+
+def _empty(value):
+    return value in (None, "") or value == {}
+
+
+def _param(value):
+    """Numbers as numbers (the form stores them that way), everything else as text."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    return int(number) if number.is_integer() else number
+
+
+def autofill(cfg, values, today):
+    """AB-029: fill empty configuration fields from read profile values.
+
+    ``values`` maps profile field key -> {"entity_id", "value"} for currently valid readings. Returns
+    ``(cfg, report)`` with report lists ``filled``, ``refreshed``, ``kept`` (user value, not overwritten)
+    and ``missing`` (no valid reading). ``cfg`` is changed in place.
+    """
+    source = cfg["building"].get("heat_source") or {}
+    prof = profile(source.get("profile"))
+    report = {"filled": [], "refreshed": [], "kept": [], "missing": []}
+    if not prof or not cfg.get("circuits"):
+        return cfg, report
+    done = source.setdefault("autofilled", {})
+    proposals = {}
+    if source.get("source", "ha") == "ha":
+        for path, key in AUTOFILL_ENTITIES:
+            proposals[path] = values[key]["entity_id"] if key in values else None
+    if prof["key"] in PROFILE_MANUFACTURER:
+        proposals["building.heat_pump.manufacturer"] = PROFILE_MANUFACTURER[prof["key"]]
+    kind = HEATING_TYPE_MAP.get(str((values.get("heating_type") or {}).get("value", "")).strip().lower())
+    proposals["building.heating_system"] = kind
+    proposals["circuit.emitter_type"] = kind
+    labels = {f["key"]: f["label"] for f in prof["fields"]}
+    params = {labels[k]: _param(values[k]["value"]) for k in CURVE_PARAMS if k in values}
+    stamp = f"{prof['label']}, automatisch ausgelesen am {today}"
+    proposals["circuit.heating_curve.manufacturer_params"] = params or None
+    proposals["circuit.heating_curve.reference"] = stamp if params else None
+    try:
+        min_ext = float(values["min_ext"]["value"]) if "min_ext" in values else None
+    except (TypeError, ValueError):
+        min_ext = None
+    proposals["building.design_outdoor_c"] = min_ext
+    proposals["building.design_outdoor_reference"] = (
+        f"Regler: minimale Außentemperatur (Heizkurven-Auslegungspunkt), automatisch ausgelesen am {today}. "
+        "Mit der Heizlastberechnung abgleichen.") if min_ext is not None else None
+    for path, new in proposals.items():
+        node, key = _target(cfg, path)
+        if node is None:
+            continue
+        label = AUTOFILL_LABELS[path]
+        current = node.get(key)
+        if new is None:
+            if _empty(current):
+                report["missing"].append(label)
+            continue
+        if _empty(current):
+            node[key] = new
+            done[path] = new
+            report["filled"].append(label)
+        elif path in done and done[path] == current:
+            if path.endswith(".reference") or current == new:   # date-only change is no refresh
+                continue
+            node[key] = new
+            done[path] = new
+            report["refreshed"].append(label)
+        elif current != new:
+            report["kept"].append(label)
+    return cfg, report

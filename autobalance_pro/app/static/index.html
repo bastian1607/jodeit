@@ -139,7 +139,7 @@ label.check{font-weight:400;display:flex;gap:8px;align-items:flex-start}label.ch
 <div><label>Warmwasserstatus (HA)</label><div id="hp-dhw"></div></div>
 </div>
 <h3>Wärmepumpe und Heizkurve auslesen (nur lesen)</h3>
-<div id="hs-detect"></div>
+<div id="hs-detect"></div><div id="hs-autofill"></div>
 <p class="hint">Mit einem Geräteprofil liest AutoBalance Heizkurve, Vorlauf/Rücklauf und Betriebszustand der Wärmepumpe mit. Es werden keine Werte an die Wärmepumpe gesendet.</p>
 <div class="grid">
 <div><label for="hs-profile">Geräteprofil</label><select id="hs-profile"><option value="">Kein Profil</option></select></div>
@@ -207,8 +207,9 @@ async function api(path,method='GET',obj){
 /* Saves are serialised: never two overlapping POSTs with stale state (design §5). */
 function saveConfig(next){
   const run=saveChain.then(async()=>{
-    await api('v2/config','POST',next);
-    cfg=clone(next);saved=clone(next);
+    const r=await api('v2/config','POST',next);
+    if(r&&r.autofill&&(r.autofill.filled.length||r.autofill.refreshed.length)){cfg=await api('v2/config');saved=clone(cfg)}   // AB-029
+    else{cfg=clone(next);saved=clone(next)}
     await loadReadiness();
   });
   saveChain=run.catch(()=>{});
@@ -599,6 +600,22 @@ function showPlant(){
   el('hs-result').replaceChildren();syncHeatSource();
   drawCircuits();
   detectHeatSource(hs.profile);
+  renderAutofill(hs);
+}
+/* AB-029: what the app took over from the device by itself (read-only towards the device). */
+async function renderAutofill(hs){
+  const root=el('hs-autofill');root.replaceChildren();if(!hs.profile)return;
+  let s;try{s=await api('v2/heat-source/autofill')}catch(_){return}
+  const r=s.report;if(!r)return;
+  const box=document.createElement('div');box.className='info-box';box.id='hs-autofill-box';
+  const add=(title,list,cls)=>{if(!list.length)return;const p=document.createElement('p');if(cls)p.className=cls;p.textContent=title+': '+list.join(', ');box.append(p)};
+  add('Automatisch aus der Anlage übernommen',r.filled.concat(r.refreshed));
+  add('Eigene Angaben beibehalten (weichen von der Anlage ab)',r.kept,'hint');
+  add('In der Anlage nicht verfügbar, bitte selbst eintragen',r.missing,'hint');
+  const n=document.createElement('p');n.className='hint';
+  n.textContent='Leere Felder werden automatisch gefüllt und bei Änderungen an der Anlage aktualisiert. Eigene Eingaben werden nie überschrieben. Es wird nichts an die Anlage gesendet.';
+  box.append(n);
+  if(box.children.length>1)root.append(box);
 }
 /* AB-022: propose a matching profile from existing HA entities; saving needs one click. */
 async function detectHeatSource(current){
@@ -623,7 +640,13 @@ function syncHeatSource(){
   el('hs-source').disabled=!on;el('hs-test').disabled=!on;
   el('hs-host-wrap').classList.toggle('hidden',!on||el('hs-source').value!=='emsesp_rest');
 }
-function heatSourceDraft(){return {profile:el('hs-profile').value,source:el('hs-source').value,emsesp_host:el('hs-host').value.trim()}}
+function heatSourceDraft(){
+  const prev=(plantDraft&&plantDraft.building&&plantDraft.building.heat_source)||{};
+  const d={profile:el('hs-profile').value,source:el('hs-source').value,emsesp_host:el('hs-host').value.trim()};
+  // AB-029: keep the record of automatically filled values; a new profile/source starts a new record
+  if(prev.autofilled&&prev.profile===d.profile&&prev.source===d.source)d.autofilled=prev.autofilled;
+  return d;
+}
 for(const id of ['hs-profile','hs-source','hs-host'])el(id).addEventListener('input',()=>{syncHeatSource();markPlantDirty()});
 el('hs-test').addEventListener('click',async()=>{
   const root=el('hs-result');root.textContent='Wird gelesen …';

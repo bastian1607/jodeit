@@ -19,6 +19,17 @@
 
 **Hinweis:** Die App ist für Home Assistant OS/Supervised konzipiert; Installation über den HA App Store wurde noch nicht an einem echten System getestet. Keine Router-Portfreigabe erforderlich.
 
+## Anlagendaten automatisch übernehmen (AB-029, in Entwicklung)
+
+Ist in Schritt 3 ein Geräteprofil gewählt (z. B. Buderus · BBQKees/EMS-ESP), füllt die App alle **leeren**
+Felder, die das Profil liefert: Entitäten für Außentemperatur, Warmwasser, Vorlauf, Vorlauf-Soll, Rücklauf und
+Heizkreispumpe (nur Quelle Home Assistant), Hersteller, Heizsystem/Heizflächenart (nur eindeutige Reglerwerte),
+Heizkurvenparameter laut Regler mit Quelle und Datum sowie die minimale Außentemperatur des Reglers (mit Hinweis,
+sie mit der Heizlastberechnung abzugleichen). Sofort nach dem Speichern und danach bei jeder Messung (5 min).
+Von der App gefüllte Werte werden bei Änderungen am Regler aktualisiert; **eigene Eingaben werden nie
+überschrieben**. Keine Heizkurvenpunkte, keine Auslegungsvorlauftemperatur, kein Verdichterstatus (nicht eindeutig).
+Rein lesend: nichts wird an die Anlage gesendet.
+
 ## Messdaten, Aufbewahrung und Löschung (AB-025, AB-026)
 
 - Jede Messung hat eine eigene ID. Messwerte, die während einer Messung erfasst werden, tragen diese ID.
