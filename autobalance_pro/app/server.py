@@ -1,8 +1,8 @@
 """AutoBalance Pro – read-only Home Assistant pilot."""
 import json,sys,logging,math,os,re,sqlite3,threading,time,urllib.request
 from version import VERSION
-import model
-from datetime import datetime,timezone
+import model,coverage
+from datetime import datetime,timedelta,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -34,6 +34,9 @@ def setup():
         # projection so a downgrade to v0.1.x still finds a readable configuration.
         c.execute("CREATE TABLE IF NOT EXISTS config_v2 (id INTEGER PRIMARY KEY CHECK(id=1), schema_version INTEGER NOT NULL, value TEXT NOT NULL, v1_mirror TEXT NOT NULL, updated_at TEXT NOT NULL)")
         c.execute("CREATE TABLE IF NOT EXISTS schema_migrations (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, kind TEXT NOT NULL, applied_at TEXT NOT NULL, backup_path TEXT)")
+        # AB-020: app starts are logged so a gap can be related to a restart. Additive table.
+        c.execute("CREATE TABLE IF NOT EXISTS app_events (id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT)")
+        c.execute("CREATE INDEX IF NOT EXISTS samples_entity_at ON samples(entity_id,at)")
     sync_config()
 
 def backup_database(reason):
@@ -243,6 +246,37 @@ def latest_observations(now=None):
         observations.append(item)
     return observations
 
+def log_event(kind,detail=None):
+    with connect() as c:c.execute("INSERT INTO app_events(at,kind,detail) VALUES(?,?,?)",(utcnow().isoformat(),kind,detail))
+
+def data_quality(hours=168,now=None):
+    """AB-020 report: gaps, coverage per entity, restarts. Read-only on the local DB."""
+    now=now or utcnow()
+    start=(now-timedelta(hours=hours)).isoformat()
+    desired=wanted(load_v2())
+    with connect() as c:
+        before=c.execute("SELECT MAX(at) FROM samples WHERE at<?",(start,)).fetchone()[0]
+        ticks=[r[0] for r in c.execute("SELECT DISTINCT at FROM samples WHERE at>=? ORDER BY at",(start,))]
+        rows=[r for r in c.execute("SELECT entity_id,MIN(at),COUNT(*),SUM(valid) FROM samples WHERE at>=? GROUP BY entity_id ORDER BY entity_id",(start,)) if r[0] in desired]
+        events=[{"at":a,"kind":k} for a,k in c.execute("SELECT at,kind FROM app_events WHERE at>=? ORDER BY at",(start,))]
+        attempt=c.execute("SELECT last_attempt FROM acquisition WHERE id=1").fetchone()
+    report=coverage.analyse(([before] if before else [])+ticks,rows,attempt[0] if attempt else None,now,hours)
+    report["configured"]=bool(desired)
+    if not desired:report["status"]="not_configured"
+    report["events"]=events
+    seen={r[0] for r in rows}
+    report["entities_without_samples"]=sorted(desired-seen)
+    return report
+
+def acquisition_health(now=None):
+    """Compact status for /health and external monitors (no database writes)."""
+    try:
+        r=data_quality(hours=24,now=now)
+        return {"status":r["status"],"last_tick":r["last_tick"],"last_tick_age_seconds":r["last_tick_age_seconds"],"loop_stalled":r["loop_stalled"]}
+    except Exception:
+        logging.exception("Datenqualität nicht ermittelbar")
+        return {"status":"unknown","last_tick":None,"last_tick_age_seconds":None,"loop_stalled":None}
+
 STOP=threading.Event()
 def loop(interval=300):
     while not STOP.is_set():
@@ -276,7 +310,18 @@ class API(BaseHTTPRequestHandler):
             self.send_header("Content-Length",str(len(body)))
             self.end_headers()
             return self.wfile.write(body)
-        if path=="/health":return self.send_json(200,{"ok":True,"read_only":True,"version":VERSION,"schema_version":model.SCHEMA_VERSION})
+        if path=="/health":return self.send_json(200,{"ok":True,"read_only":True,"version":VERSION,"schema_version":model.SCHEMA_VERSION,"acquisition":acquisition_health()})
+        if path=="/health/acquisition":
+            # AB-020: for an external monitor. 503 only when the app's own acquisition loop is stuck
+            # (no attempt for > 60 min); an unreachable HA is reported in /health, not here.
+            h=acquisition_health()
+            return self.send_json(503 if h["loop_stalled"] and h["status"]!="not_configured" else 200,h)
+        if path=="/api/v2/data-quality":
+            query=dict(p.split("=",1) for p in urlsplit(self.path).query.split("&") if "=" in p)
+            try:hours=int(query.get("hours","168"))
+            except ValueError:return self.send_json(400,{"error":"hours ungültig"})
+            if not 1<=hours<=24*31:return self.send_json(400,{"error":"hours ungültig"})
+            return self.send_json(200,data_quality(hours))
         if path=="/api/config":return self.send_json(200,load())
         if path=="/api/v2/config":return self.send_json(200,load_v2())
         if path=="/api/v2/readiness":
@@ -314,6 +359,7 @@ def main(port=None,install_signals=True,ready=None):
     """Run acquisition and HTTP API; return 0 after an orderly SIGTERM/SIGINT shutdown (AB-010)."""
     import signal
     setup()
+    log_event("start",VERSION)
     STOP.clear()
     httpd=ThreadingHTTPServer(("0.0.0.0",PORT if port is None else port),API)
     worker=threading.Thread(target=loop,daemon=True,name="acquisition")
@@ -330,6 +376,8 @@ def main(port=None,install_signals=True,ready=None):
     finally:
         httpd.server_close()
         worker.join(timeout=10)  # an in-flight HA request may take up to its own timeout
+        try:log_event("stop")
+        except Exception:logging.exception("Stopp-Ereignis nicht gespeichert")
         logging.info("AutoBalance beendet")
     return 0
 

@@ -139,6 +139,9 @@ details.card>.body{padding:0 12px 12px}
 <div class="panel"><h2>A · Passive Messung</h2>
 <p class="hint">Die Messung läuft automatisch alle fünf Minuten, sobald einem Raum ein Temperaturfühler zugeordnet ist. Fehlende Heizlast-, Heizkreis- oder Heizkörperdaten halten sie nicht an.</p>
 <div id="measure-list"></div>
+<h3>Datenabdeckung der letzten 7 Tage</h3>
+<p class="hint">Zeiträume ohne gespeicherte Messung bleiben als Lücke sichtbar, auch nach einem Neustart. Es werden keine Werte nachträglich aufgefüllt.</p>
+<div id="data-quality">Wird geladen …</div>
 <h3>Aufgezeichnete Messwerte</h3><button id="refresh-samples">Aktualisieren</button><div id="sample-list"></div></div>
 <div class="panel"><h2>B · Vorbereitung hydraulischer Abgleich</h2>
 <p class="hint">Reine Prüfung der erfassten Daten. Eine Berechnung von Durchflüssen oder Ventilstufen ist noch nicht verfügbar.</p>
@@ -672,6 +675,7 @@ async function showCheck(){
   };
   section('Anlage',readinessData.building,'Angaben vollständig');
   for(const r of cfg.rooms){const d=readinessData.rooms[r.id];if(d)section(r.name,d.blockers,'Auslegungsdaten vollständig – Berechnung noch nicht verfügbar')}
+  await loadDataQuality();renderDataQuality();dataQualityBanner();
   await latest();
 }
 
@@ -696,13 +700,49 @@ function sampleHTML(x){
   const raw=hasN?'<div class="hint">Originalwert: '+safe(x.state)+' '+safe(x.unit)+'</div>':'';
   return '<div class="item"><b>'+safe(x.entity_id)+'</b><div>'+value+'</div>'+raw+'<div class="tag '+(valid?'ok':'error')+'">'+safe(label)+'</div><div class="hint">Erfasst: '+safe(dateText(x.at))+' · HA-Meldung: '+safe(dateText(x.source_at))+'</div></div>';
 }
+/* ---------- AB-020 Datenlücken ---------- */
+let dqData=null;
+const DQ_TEXT={ok:'Datenerfassung aktiv',delayed:'Datenerfassung verzögert',warning:'Messung unterbrochen',critical:'Messung seit über 60 Minuten unterbrochen – bitte Fachbetrieb prüfen lassen',no_data:'Noch keine Messdaten gespeichert',not_configured:'Messung nicht eingerichtet'};
+const DQ_KIND={ok:'good',delayed:'warn',warning:'bad',critical:'bad',no_data:'warn',not_configured:'warn'};
+function pct(v){return v===null||v===undefined?'–':Math.round(v*100)+' %'}
+function minutesText(m){return m>=120?(Math.round(m/6)/10).toLocaleString('de-DE')+' h':m+' min'}
+function gapText(g){return g.ongoing?'Seit '+dateText(g.start)+' keine Messung ('+minutesText(g.minutes)+').':'Messung wurde zwischen '+dateText(g.start)+' und '+dateText(g.end)+' nicht erfasst ('+minutesText(g.minutes)+').'}
+async function loadDataQuality(){try{dqData=await api('v2/data-quality?hours=168')}catch(_){dqData=null}return dqData}
+function dataQualityBanner(){
+  if(!dqData||!['warning','critical'].includes(dqData.status))return;
+  const g=dqData.gaps.find(x=>x.ongoing);
+  const root=el('acquisition-status');root.textContent=DQ_TEXT[dqData.status]+'. '+(g?gapText(g):'')+' Gespeicherte Werte sind keine aktuelle Messung.';root.className='alert error';
+}
+function renderDataQuality(){
+  const root=el('data-quality');if(!root)return;root.replaceChildren();
+  if(!dqData){root.textContent='Datenabdeckung derzeit nicht abrufbar.';return}
+  const head=document.createElement('div');head.className='item';head.id='dq-head';
+  head.append(badge(DQ_TEXT[dqData.status]||dqData.status,DQ_KIND[dqData.status]||'warn'));
+  const p=document.createElement('p');
+  p.textContent='Letzte gespeicherte Messung: '+dateText(dqData.last_tick)+'. Abdeckung im Zeitraum: '+pct(dqData.coverage)+'. Fehlende Zeit: '+minutesText(dqData.gap_minutes_total)+'.';
+  head.append(p);root.append(head);
+  const gaps=document.createElement('div');gaps.id='dq-gaps';
+  if(!dqData.gaps.length){const x=document.createElement('p');x.textContent='Keine Messlücken über 15 Minuten.';gaps.append(x)}
+  for(const g of dqData.gaps.slice().reverse()){const box=document.createElement('div');box.className='warn-box dq-gap';box.textContent=gapText(g)+(g.ongoing?'':' Die Auswertung berücksichtigt diese Lücke; Messzeitraum ggf. verlängern.');gaps.append(box)}
+  root.append(gaps);
+  const starts=dqData.events.filter(e=>e.kind==='start');
+  if(starts.length){const s=document.createElement('p');s.className='hint';s.textContent='App-Starts im Zeitraum: '+starts.map(e=>dateText(e.at)).join(', ');root.append(s)}
+  const list=document.createElement('div');list.id='dq-entities';
+  for(const e of dqData.entities){const row=document.createElement('div');row.className='item row';const n=document.createElement('span');n.textContent=e.entity_id;
+    const kind=e.valid_coverage===null?'warn':e.valid_coverage>=0.95?'good':e.valid_coverage>=0.8?'warn':'bad';
+    row.append(n,badge('Gültig '+pct(e.valid_coverage)+' · erfasst '+pct(e.coverage),kind));list.append(row)}
+  for(const id of dqData.entities_without_samples||[]){const row=document.createElement('div');row.className='item row';const n=document.createElement('span');n.textContent=id;row.append(n,badge('Noch keine Messung','warn'));list.append(row)}
+  root.append(list);
+}
 async function stats(){
   try{const m=await api('overview');acquisitionStatus(m.acquisition||{});
-    el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)]].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
+    await loadDataQuality();dataQualityBanner();
+    el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)],['Abdeckung 7 Tage',dqData?pct(dqData.coverage):'–'],['Messlücken 7 Tage',dqData?dqData.gaps.length:'–']].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
+    renderDataQuality();
   }catch(ex){acquisitionUnavailable()}
 }
 async function latest(){
-  try{const d=await api('latest');if(d.acquisition)acquisitionStatus(d.acquisition);
+  try{const d=await api('latest');if(d.acquisition){acquisitionStatus(d.acquisition);dataQualityBanner()}
     el('sample-list').innerHTML=d.observations.length?d.observations.map(sampleHTML).join(''):'<p>Noch keine Messungen für die zugeordneten Entitäten gespeichert.</p>';
   }catch(ex){el('sample-list').textContent='Messwerte derzeit nicht abrufbar. Bitte erneut aktualisieren.';acquisitionUnavailable()}
 }
