@@ -37,6 +37,7 @@ THRESHOLDS = {
 }
 SLOT = timedelta(minutes=THRESHOLDS["slot_minutes"])
 
+RESTRICTED_LABEL = "Vorläufig · fachlich eingeschränkt"
 STAGE_TEXT = {
     "no_data": "Keine Messdaten in dieser Messung",
     "insufficient": "Messung unzureichend – keine Heizkurvenempfehlung",
@@ -388,6 +389,8 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
     out.update({
         "stage": stage, "reasons": reasons,
         "stage_text": STAGE_TEXT[stage], "disturbance_notice": disturbance_notice,
+        # Review 8: without verified DHW/defrost coverage a level/slope statement is only provisional.
+        "restricted": disturbance_notice is not None, "restricted_label": RESTRICTED_LABEL if disturbance_notice else None,
         "disturbances_verified": disturbance_checked,
         "nights": nights, "technical_nights": len(valid_current), "valid_nights": len(current), "valid_hours": round(sum(n["ok_hours"] for n in current), 1),
         "outdoor_band": {"min": sorted_band[0] if band else None, "max": sorted_band[-1] if band else None,

@@ -630,6 +630,7 @@ class AcceptanceTests(V2Browser):
         expect(stage).to_contain_text("vorläufig")
         expect(self.page.locator("#assessment-basis")).to_contain_text("Abtauung nicht erkennbar")
         expect(self.page.locator("#assessment-nights")).to_contain_text("technisch auswertbar · Heizbetrieb nicht nachgewiesen")
+        expect(self.page.locator("#assessment-restricted")).to_have_count(0)      # unverified: no level statement to restrict
         expect(self.page.locator("#assessment")).to_contain_text("Bad nicht überwacht")
         content = self.page.content()
         for forbidden in ("Offset auf", "Heizkurve anheben", "Empfehlung übernehmen"):

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 import assessment  # noqa: E402
+import report  # noqa: E402
 import model  # noqa: E402
 import server  # noqa: E402
 
@@ -29,6 +30,10 @@ def config(rooms=(("wz", "Wohnzimmer", ["sensor.wz"], ["binary_sensor.f_wz"], 21
                              "heat_load": model.empty_heat_load(), "design_indoor_c": None, "design_indoor_reference": "",
                              "temperature_sensors": list(sensors), "window_sensors": list(windows)})
     return cfg
+
+
+def p_end(r):
+    return datetime.fromisoformat(r["window"]["end"])
 
 
 class Plant:
@@ -230,6 +235,13 @@ class AssessmentTests(unittest.TestCase):
         self.assertEqual(r["stage"], "level")
         self.assertEqual(r["stage_text"], assessment.STAGE_TEXT["level"])      # notice is separate, not appended
         self.assertEqual(r["disturbance_notice"], "WW-/Abtauphasen nicht zuverlässig erfasst. Messergebnis fachlich eingeschränkt.")
+        self.assertTrue(r["restricted"])
+        self.assertEqual(r["restricted_label"], "Vorläufig · fachlich eingeschränkt")
+        r["texts"] = assessment.report_text(r)
+        html = report.render({"name": "T", "started_at": r["window"]["start"], "ended_at": None, "note": ""}, r, [], [], [], {},
+                             timezone.utc, "UTC", "t", p_end(r))
+        self.assertIn("Vorläufig · fachlich eingeschränkt: " + assessment.STAGE_TEXT["level"], html)
+        self.assertIn('class="result warn" id="report-result"', html)
 
     def test_review7_e_status_assigned_but_unavailable_all_nights(self):
         p = Plant()
