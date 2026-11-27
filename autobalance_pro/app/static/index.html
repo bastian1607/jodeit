@@ -162,7 +162,7 @@ details.card>.body{padding:0 12px 12px}
 <p class="hint">Ein Messauftrag grenzt den ausgewerteten Zeitraum je Einsatzort ab (Ziel ca. 7 Tage). Er speichert nur lokal und sendet nichts an Home Assistant oder die Wärmepumpe.</p>
 <div id="session-panel"></div>
 <div id="assessment"></div>
-<h3>Datenabdeckung der letzten 7 Tage</h3>
+<h3 id="dq-title">Messqualität · letzte 7 Tage</h3>
 <p class="hint">Zeiträume ohne gespeicherte Messung bleiben als Lücke sichtbar, auch nach einem Neustart. Es werden keine Werte nachträglich aufgefüllt.</p>
 <div id="data-quality">Wird geladen …</div>
 <h3>Aufgezeichnete Messwerte</h3><button id="refresh-samples">Aktualisieren</button><div id="sample-list"></div></div>
@@ -793,7 +793,20 @@ const DQ_KIND={ok:'good',delayed:'warn',warning:'bad',critical:'bad',no_data:'wa
 function pct(v){return v===null||v===undefined?'–':Math.round(v*100)+' %'}
 function minutesText(m){return m>=120?(Math.round(m/6)/10).toLocaleString('de-DE')+' h':m+' min'}
 function gapText(g){return g.ongoing?'Seit '+dateText(g.start)+' keine Messung ('+minutesText(g.minutes)+').':'Messung wurde zwischen '+dateText(g.start)+' und '+dateText(g.end)+' nicht erfasst ('+minutesText(g.minutes)+').'}
-async function loadDataQuality(){try{dqData=await api('v2/data-quality?hours=168')}catch(_){dqData=null}return dqData}
+/* AC-020-11: with a running job, coverage is shown since its start (max. 7 days), never as "7 Tage". */
+let activeJob=null;
+function jobHours(){return activeJob?Math.max(1,Math.min(168,Math.ceil((Date.now()-new Date(activeJob.started_at).getTime())/3600000))):168}
+async function loadDataQuality(){
+  try{activeJob=(await api('v2/sessions')).active}catch(_){activeJob=null}
+  try{dqData=await api('v2/data-quality?hours='+jobHours())}catch(_){dqData=null}
+  const t=el('dq-title');if(t)t.textContent=activeJob?'Messqualität · seit Messbeginn (maximal 7 Tage)':'Messqualität · letzte 7 Tage';
+  return dqData}
+function durationText(ms){const h=ms/3600000;return h<48?Math.max(0,Math.round(h*10)/10).toLocaleString('de-DE')+' h':(Math.round(h/2.4)/10).toLocaleString('de-DE')+' Tage'}
+function coverageStat(){
+  if(!dqData)return ['Abdeckung','–'];
+  if(activeJob)return ['Abdeckung seit Messbeginn',pct(dqData.coverage)+' · '+durationText(Date.now()-new Date(activeJob.started_at).getTime())+' erfasst · Ziel: '+activeJob.planned_days+' Tage'];
+  return ['Abdeckung (max. 7 Tage, kein Messauftrag)',pct(dqData.coverage)];
+}
 function dataQualityBanner(){
   if(!dqData||!['warning','critical'].includes(dqData.status))return;
   const g=dqData.gaps.find(x=>x.ongoing);
@@ -916,12 +929,16 @@ async function renderAssessment(id){
   const rooms=document.createElement('p');rooms.className='hint';
   rooms.textContent='Räume in geeigneten Nächten (Median Ist − Soll): '+r.rooms.map(x=>x.name+' '+(x.monitored?(x.deviation_median_k===null?'keine Daten':(x.deviation_median_k>0?'+':'')+num1(x.deviation_median_k)+' K'+(x.stationary===false?' (nicht stationär)':'')):'nicht überwacht')).join(' · ');
   root.append(rooms);
+  const links=document.createElement('div');links.className='actions';
+  const rep=document.createElement('a');rep.id='report-link';rep.href='api/v2/sessions/'+encodeURIComponent(id)+'/report';rep.target='_blank';rep.rel='noopener';rep.textContent='Messbericht öffnen (druckbar)';
+  const csv=document.createElement('a');csv.href='api/v2/sessions/'+encodeURIComponent(id)+'/export.csv';csv.setAttribute('download','');csv.textContent='Messwerte dieses Messauftrags (CSV)';
+  links.append(rep,document.createTextNode(' · '),csv);root.append(links);
   const note=document.createElement('p');note.className='hint';note.textContent='Pilotregelwerk (Schwellen noch im Feld zu bestätigen). AutoBalance berechnet keine Parameteränderung und schreibt nichts an die Wärmepumpe.';root.append(note);
 }
 async function stats(){
   try{const m=await api('overview');acquisitionStatus(m.acquisition||{});
     await loadDataQuality();dataQualityBanner();
-    el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)],['Abdeckung 7 Tage',dqData?pct(dqData.coverage):'–'],['Messlücken 7 Tage',dqData?dqData.gaps.length:'–']].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
+    el('stats').innerHTML=[['Räume',m.rooms],['Gemeinsame Zonen',m.zones],['Messpunkte',m.samples],['Letzte Messung',dateText(m.last_sample)],coverageStat(),['Fachliche Aussagekraft',activeJob?'Siehe Schritt 5 · Messauftrag':'Kein Messauftrag'],['Messlücken',dqData?dqData.gaps.length:'–']].map(([k,v])=>'<div class="item"><span class="hint">'+k+'</span><h2>'+safe(v)+'</h2></div>').join('');
     renderDataQuality();
     await renderHeatSnapshot();
   }catch(ex){acquisitionUnavailable()}
