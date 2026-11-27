@@ -804,7 +804,7 @@ class MobileTests(V2Browser):
         row.locator(".job-delete").click()
         box = row.locator("#delete-confirm")
         expect(box).to_contain_text(jobs[0]["id"])
-        expect(box).to_contain_text("Home-Assistant-Sicherungen")
+        expect(box).to_contain_text("Vorhandene HA-Sicherungen können weiterhin Daten enthalten und müssen separat geprüft werden.")
         box.locator(".confirm-word").fill("falsch")
         box.locator(".confirm-ok").click()
         expect(self.page.locator("#notice")).to_contain_text("Nichts geändert")

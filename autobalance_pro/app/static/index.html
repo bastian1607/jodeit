@@ -975,7 +975,7 @@ async function renderSessions(){
         run:async()=>{await api('v2/sessions/archive','POST',{id:s.id});notice('Ablage bestätigt.');renderSessions();stats()}}));actions.append(ar)}
     const del=document.createElement('button');del.type='button';del.className='danger job-delete';del.textContent='Messung jetzt vom Messgerät löschen …';
     del.addEventListener('click',()=>inlineConfirm(row,{id:'delete-confirm',danger:true,
-      text:'Messung „'+s.name+'“ (ID '+s.id+', Messende '+dateText(s.ended_at)+') mit allen Messwerten und dem festgeschriebenen Bericht endgültig vom Messgerät löschen. Kopien in Home-Assistant-Sicherungen werden dadurch nicht gelöscht.',
+      text:'Messung „'+s.name+'“ (ID '+s.id+', Messende '+dateText(s.ended_at)+') mit allen Messwerten und dem festgeschriebenen Bericht endgültig vom Messgerät löschen. Vorhandene HA-Sicherungen können weiterhin Daten enthalten und müssen separat geprüft werden.',
       word:s.name,wordLabel:'Zur Bestätigung die Bezeichnung genau eingeben',ok:'Endgültig löschen',
       run:async(typed)=>{await api('v2/sessions/delete','POST',{id:s.id,confirm:typed});notice('Messung gelöscht.');renderSessions();stats()}}));
     actions.append(del);
