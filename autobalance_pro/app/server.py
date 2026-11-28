@@ -930,7 +930,39 @@ def session_report(sid,now=None,frozen_at=None,result=None):
         if (ticks[0]-start_dt).total_seconds()>coverage.WARN_SECONDS:gaps.insert(0,gap(start_dt,ticks[0]))
     gaps=[dict(g,start=g["start"].isoformat(),end=g["end"].isoformat()) for g in gaps]
     tz,tz_name,_=plant_timezone()
-    return report.render(s,result,gaps,events,params,entity_labels(cfg),tz,tz_name,s.get("app_version") or VERSION,now,frozen_at=frozen_at)
+    points,damped,cmeta=curve_points(sid,cfg)
+    return report.render(s,result,gaps,events,params,entity_labels(cfg),tz,tz_name,s.get("app_version") or VERSION,now,frozen_at=frozen_at,
+        cfg=cfg,curve_points=points,curve_damped=damped,curve_meta=cmeta,logo_uri=logo_data_uri())
+
+_LOGO_URI=None
+def logo_data_uri():
+    """AC-030-07/09: original Jodeit logo embedded in the report (no external request, prints offline)."""
+    global _LOGO_URI
+    if _LOGO_URI is None:
+        import base64
+        try:_LOGO_URI="data:image/png;base64,"+base64.b64encode((ROOT/"static"/"jodeit-logo.png").read_bytes()).decode()
+        except OSError:_LOGO_URI=""
+    return _LOGO_URI or None
+
+def curve_points(sid,cfg,limit=2000):
+    """AB-030: measured pairs (outdoor, flow target) of this job only - for display, no curve fitting.
+
+    Unfiltered: technically valid pairs, DHW/defrost/non-heating slots are NOT removed (labelled as such in the report).
+    Uses the damped outdoor temperature when the profile has one, else the raw one (damped=False) - never mixed.
+    Returns (points, damped, meta) with meta = {n, from, to, target, outdoor}."""
+    by_key={f["key"]:eid for eid,f in devices.entities(heat_source(cfg)).items()}
+    target=by_key.get("flow_target")
+    outdoor,damped=(by_key.get("outdoor_damped"),True) if by_key.get("outdoor_damped") else (by_key.get("outdoor"),False)
+    meta={"n":0,"from":None,"to":None,"target":target,"outdoor":outdoor}
+    if not target or not outdoor:return [],damped,meta
+    with connect() as c:
+        rows=c.execute("""SELECT o.normalized_value,t.normalized_value,t.at FROM samples t JOIN samples o
+            ON o.at=t.at AND o.session_id=t.session_id WHERE t.session_id=? AND t.entity_id=? AND o.entity_id=?
+            AND t.valid=1 AND o.valid=1 AND t.normalized_value IS NOT NULL AND o.normalized_value IS NOT NULL ORDER BY t.at""",
+            (sid,target,outdoor)).fetchall()
+    if rows:meta.update(n=len(rows),**{"from":rows[0][2],"to":rows[-1][2]})
+    step=max(1,-(-len(rows)//limit))
+    return [(float(a),float(b)) for a,b,_ in rows[::step]],damped,meta
 
 def session_csv(sid):
     """CSV of one job: only its own samples, labelled with its own configuration (AB-025)."""
