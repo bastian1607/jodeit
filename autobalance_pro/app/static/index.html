@@ -972,31 +972,56 @@ const REPORT_ERRORS={
   404:'Diese Messung ist auf dem Messgerät nicht vorhanden.',
   410:'Diese Messung wurde fristgemäß bzw. manuell vom Messgerät gelöscht. Der Bericht ist hier nicht mehr verfügbar.',
 };
-let reportRequest=0;
+let reportRequest=0,reportAbort=null,reportOpener=null;
+/* Review 16: every load is bound to a request token. Removing srcdoc fires a load for about:blank; old
+   handlers are detached and only the load of the current srcdoc document may reveal the frame. */
+function resetReportFrame(){
+  const frame=el('report-frame');
+  frame.onload=null;frame.classList.add('hidden');frame.removeAttribute('srcdoc');delete frame.dataset.token;
+  el('report-print').disabled=true;
+  if(reportAbort){reportAbort.abort();reportAbort=null}
+}
+function reportFailed(token,text){
+  if(token!==reportRequest)return;
+  const state=el('report-state-msg');state.className='alert error';state.textContent=text;state.classList.remove('hidden');
+}
 async function openReport(id,name){
   const view=el('report-viewer'),frame=el('report-frame'),state=el('report-state-msg'),printBtn=el('report-print');
+  resetReportFrame();
   const token=++reportRequest;
+  if(document.activeElement&&document.activeElement!==document.body&&!view.contains(document.activeElement))reportOpener=document.activeElement;
   el('report-title').textContent='Messbericht'+(name?' · '+name:'');
-  frame.classList.add('hidden');frame.removeAttribute('srcdoc');printBtn.disabled=true;
   state.className='alert';state.textContent='Bericht wird geladen …';state.classList.remove('hidden');
   view.classList.remove('hidden');document.body.classList.add('report-open');el('report-back').focus();
-  let res;
-  try{res=await fetch('api/v2/sessions/'+encodeURIComponent(id)+'/report',{credentials:'same-origin',cache:'no-store'})}
-  catch(_){if(token!==reportRequest)return;state.className='alert error';state.textContent='Keine Verbindung zu AutoBalance. Netzwerk prüfen und erneut versuchen.';return}
-  if(token!==reportRequest)return;
-  if(!res.ok){
-    state.className='alert error';
-    state.textContent=REPORT_ERRORS[res.status]||(res.status>=500?'Serverfehler beim Erstellen des Berichts (HTTP '+res.status+'). Bitte später erneut versuchen.':'Bericht konnte nicht geladen werden (HTTP '+res.status+').');
-    return;
+  const ctrl=new AbortController();reportAbort=ctrl;
+  let res,html;
+  try{
+    res=await fetch('api/v2/sessions/'+encodeURIComponent(id)+'/report',{credentials:'same-origin',cache:'no-store',signal:ctrl.signal});
+    if(token!==reportRequest)return;
+    if(!res.ok)return reportFailed(token,REPORT_ERRORS[res.status]||(res.status>=500?'Serverfehler beim Erstellen des Berichts (HTTP '+res.status+'). Bitte später erneut versuchen.':'Bericht konnte nicht geladen werden (HTTP '+res.status+').'));
+    html=await res.text();                      // a broken body after HTTP 200 lands in catch (AC16-03)
+  }catch(_){
+    if(token!==reportRequest||ctrl.signal.aborted)return;
+    return reportFailed(token,res&&res.ok?'Bericht wurde unvollständig übertragen. Bitte erneut versuchen.':'Keine Verbindung zu AutoBalance. Netzwerk prüfen und erneut versuchen.');
   }
-  const html=await res.text();if(token!==reportRequest)return;
+  if(token!==reportRequest)return;
+  reportAbort=null;
+  frame.dataset.token=String(token);
   frame.onload=()=>{
-    try{const d=frame.contentDocument;d.querySelectorAll('.noprint').forEach(n=>n.remove())}catch(_){}   // own print button instead
+    let doc=null;try{doc=frame.contentDocument}catch(_){}
+    // only the srcdoc document of this very request counts (not about:blank of a reset)
+    if(token!==reportRequest||frame.dataset.token!==String(token)||!doc||doc.URL!=='about:srcdoc')return;
+    doc.querySelectorAll('.noprint').forEach(n=>n.remove());   // own print button instead
     state.classList.add('hidden');frame.classList.remove('hidden');printBtn.disabled=false;
   };
   frame.srcdoc=html;
 }
-function closeReport(){reportRequest++;el('report-viewer').classList.add('hidden');document.body.classList.remove('report-open');el('report-frame').removeAttribute('srcdoc')}
+function closeReport(){
+  reportRequest++;resetReportFrame();
+  el('report-viewer').classList.add('hidden');document.body.classList.remove('report-open');
+  if(reportOpener&&reportOpener.isConnected)reportOpener.focus();   // keyboard users return to their button
+  reportOpener=null;
+}
 function printReport(){
   try{el('report-frame').contentWindow.focus();el('report-frame').contentWindow.print()}
   catch(_){notice('Drucken ist in dieser Ansicht nicht möglich. Bitte Browser-Druckfunktion verwenden.',true)}

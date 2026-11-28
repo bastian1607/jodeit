@@ -685,6 +685,63 @@ class AcceptanceTests(V2Browser):
         expect(self.page.locator("#report-state-msg")).to_contain_text("vom Messgerät gelöscht")
 
 
+    def test_review16_report_loading_lifecycle(self):
+        """AC16-01..03: delayed second report, closing while loading, broken body after HTTP 200."""
+        self.seed(rooms=("Wohnzimmer",))
+        a = server.start_session({"name": "Auftrag A", "confirmed": True})
+        server.stop_session(a["id"])
+        b = server.start_session({"name": "Auftrag B", "confirmed": True})
+        self.open()
+        self.tab("5 Prüfen & Messung")
+        frame, state, prn = self.page.locator("#report-frame"), self.page.locator("#report-state-msg"), self.page.locator("#report-print")
+        held = []
+        # AC16-01: A open, close, then B with a delayed answer
+        self.page.evaluate("([id]) => { openReport(id, 'Auftrag A'); }", [a["id"]])
+        expect(self.page.frame_locator("#report-frame").locator("body")).to_contain_text("Auftrag A")
+        self.page.route("**/report", lambda route, *_: held.append(route))
+        # close and reopen in the same tick: the about:blank load of the reset arrives while B is loading
+        self.page.evaluate("([id]) => { closeReport(); openReport(id, 'Auftrag B'); }", [b["id"]])
+        self.page.wait_for_timeout(400)                                      # removed srcdoc fired its load meanwhile
+        expect(state).to_contain_text("Bericht wird geladen")
+        expect(frame).to_be_hidden()
+        expect(prn).to_be_disabled()
+        self.assertEqual(len(held), 1)
+        held.pop().continue_()
+        expect(self.page.frame_locator("#report-frame").locator("body")).to_contain_text("Auftrag B")
+        expect(self.page.frame_locator("#report-frame").locator("body")).not_to_contain_text("Auftrag A")
+        expect(prn).to_be_enabled()
+        # AC16-02: close while loading -> late answer must not reopen or enable print
+        self.page.click("#report-back")
+        self.page.evaluate("([id]) => { openReport(id, 'Auftrag A'); }", [a["id"]])
+        self.page.wait_for_timeout(200)
+        self.page.click("#report-back")
+        for route in held:
+            try:
+                route.continue_()
+            except Exception:                                                # aborted by AbortController
+                pass
+        self.page.wait_for_timeout(500)
+        expect(self.page.locator("#report-viewer")).to_be_hidden()
+        expect(prn).to_be_disabled()
+        expect(frame).to_be_hidden()
+        self.page.unroute("**/report")
+        # AC16-03: HTTP 200 but the body breaks off
+        self.page.evaluate("""() => { const f = window.fetch; window.fetch = (u, o) => String(u).endsWith('/report')
+            ? Promise.resolve({ok: true, status: 200, text: () => Promise.reject(new TypeError('body'))}) : f(u, o); }""")
+        self.page.evaluate("([id]) => { openReport(id, 'Auftrag A'); }", [a["id"]])
+        expect(state).to_contain_text("Bericht wurde unvollständig übertragen")
+        expect(prn).to_be_disabled()
+        # P2: focus returns to the button that opened the viewer
+        self.page.reload()
+        self.tab("5 Prüfen & Messung")
+        btn = self.page.locator("#session-history .job-report").first
+        btn.focus()
+        self.page.keyboard.press("Enter")
+        expect(self.page.frame_locator("#report-frame").locator("body")).to_contain_text("Auftrag A")
+        self.page.keyboard.press("Escape")
+        self.assertTrue(btn.evaluate("e => e === document.activeElement"))
+
+
 class MobileTests(V2Browser):
     viewport = {"width": 390, "height": 844}
 
