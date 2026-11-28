@@ -1,5 +1,5 @@
 <!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jodeit AutoBalance Pro</title><style>
-:root{font:15px system-ui,-apple-system,Segoe UI,sans-serif;background:#f3f6f8;color:#203340}*{box-sizing:border-box}body{margin:0}header{background:#183c4a;color:white;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:10px}h1{font-size:22px;margin:0}header small{opacity:.8}main{max-width:1050px;margin:22px auto;padding:0 15px}.panel{background:white;border:1px solid #dce4e8;border-radius:13px;padding:20px;margin-bottom:16px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}button{cursor:pointer;background:#fff;border:1px solid #cbd6dc;padding:9px 13px;border-radius:8px;color:#253945;font:inherit}button.primary,.tabs .active{background:#126e66;color:white;border-color:#126e66}button.danger{color:#aa3030}button:disabled{opacity:.5;cursor:default}h2{font-size:19px;margin:0 0 12px}h3{font-size:16px}p,.hint{color:#5c6e79;line-height:1.5}.hint{font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.item{border:1px solid #dce4e8;border-radius:10px;margin:10px 0;padding:13px}label{font-size:13px;font-weight:600;display:block;margin:8px 0 4px}input,select,textarea{width:100%;min-width:0;border:1px solid #bacbd3;border-radius:7px;font:inherit;padding:9px;background:white}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.checks label{font-weight:400;border:1px solid #e0e7eb;padding:7px;border-radius:7px}.checks input{width:auto;margin-right:8px}.tag{font-size:12px;border-radius:20px;background:#e4f2ea;color:#175b4b;padding:4px 10px}.alert{background:#fff2da;border-radius:8px;padding:12px;margin-bottom:16px}.error{background:#fde4e4;color:#941f1f}.ok{background:#e1f4e9;color:#15583b}.hidden{display:none}.subtitle{font-size:12px;color:#6b7b85}.small{font-size:12px;color:#71818a}hr{border:0;border-top:1px solid #e3e8ed;margin:18px 0}@media(max-width:650px){header{display:block}.grid{grid-template-columns:1fr}.panel{padding:14px}main{margin:12px auto}}
+:root{font:15px system-ui,-apple-system,Segoe UI,sans-serif;background:#f3f6f8;color:#203340}*{box-sizing:border-box}body{margin:0}header{background:#183c4a;color:white;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;gap:10px}h1{font-size:22px;margin:0}header small{opacity:.8}main{max-width:1050px;margin:22px auto;padding:0 15px}.panel{background:white;border:1px solid #dce4e8;border-radius:13px;padding:20px;margin-bottom:16px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}button{cursor:pointer;background:#fff;border:1px solid #cbd6dc;padding:9px 13px;border-radius:8px;color:#253945;font:inherit}button.primary,.tabs .active{background:#126e66;color:white;border-color:#126e66}button.danger{color:#aa3030}button:disabled{opacity:.5;cursor:default}h2{font-size:19px;margin:0 0 12px}h3{font-size:16px}p,.hint{color:#5c6e79;line-height:1.5}.hint{font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.item{border:1px solid #dce4e8;border-radius:10px;margin:10px 0;padding:13px}label{font-size:13px;font-weight:600;display:block;margin:8px 0 4px}input,select,textarea{width:100%;min-width:0;border:1px solid #bacbd3;border-radius:7px;font:inherit;padding:9px;background:white}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.checks label{font-weight:400;border:1px solid #e0e7eb;padding:7px;border-radius:7px}.checks input{width:auto;margin-right:8px}.tag{font-size:12px;border-radius:20px;background:#e4f2ea;color:#175b4b;padding:4px 10px}.alert{background:#fff2da;border-radius:8px;padding:12px;margin-bottom:16px}.error{background:#fde4e4;color:#941f1f}.ok{background:#e1f4e9;color:#15583b}.hidden{display:none}.subtitle{font-size:12px;color:#6b7b85}#report-viewer{position:fixed;inset:0;z-index:50;background:#f3f6f8;display:flex;flex-direction:column}#report-viewer.hidden{display:none}.report-bar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 14px;background:#183c4a;color:white}.report-bar b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#report-frame{flex:1;width:100%;border:0;background:white}#report-state-msg{margin:16px}body.report-open{overflow:hidden}@media print{body.report-open>*:not(#report-viewer){display:none}}.small{font-size:12px;color:#71818a}hr{border:0;border-top:1px solid #e3e8ed;margin:18px 0}@media(max-width:650px){header{display:block}.grid{grid-template-columns:1fr}.panel{padding:14px}main{margin:12px auto}}
 /* Jodeit-inspired neutral presentation; exact brand values pending original assets */
 :root{background:#f5f5f4;color:#202124}
 header{background:#18191b;color:#fff}
@@ -175,6 +175,11 @@ label.check{font-weight:400;display:flex;gap:8px;align-items:flex-start}label.ch
 <div id="readiness-list"></div></div>
 </section>
 </main>
+<div id="report-viewer" class="hidden" role="dialog" aria-modal="true" aria-labelledby="report-title">
+<div class="report-bar"><button type="button" id="report-back">← Zurück zur Auswertung</button><b id="report-title">Messbericht</b><button type="button" class="primary" id="report-print" disabled>Drucken / als PDF speichern</button></div>
+<div id="report-state-msg" class="alert hidden" role="status"></div>
+<iframe id="report-frame" class="hidden" title="Messbericht" sandbox="allow-same-origin allow-modals"></iframe>
+</div>
 <script>
 'use strict';
 let cfg=null,saved=null,entities=[],catalog=[],readinessData=null,hsProfiles=[];
@@ -957,12 +962,54 @@ async function renderHeatSnapshot(){
   root.append(rooms);
   const a=document.createElement('a');a.href='api/v2/export.csv';a.textContent='Messwerte der letzten 7 Tage als CSV herunterladen';a.setAttribute('download','');root.append(a);
 }
+/* ---------- AB-030: report viewer inside the app (same Ingress session, no new tab) ----------
+   A new tab/window leaves the Home Assistant Ingress session (iOS app: external Safari) and ends in
+   "401 Unauthorized". The report is therefore loaded with a relative same-origin fetch and shown in a
+   sandboxed iframe (no scripts) in a full-screen view with its own print action. */
+const REPORT_ERRORS={
+  401:'Anmeldung abgelaufen oder nicht gültig. Bitte AutoBalance in Home Assistant neu öffnen und erneut versuchen.',
+  403:'Anmeldung abgelaufen oder nicht gültig. Bitte AutoBalance in Home Assistant neu öffnen und erneut versuchen.',
+  404:'Diese Messung ist auf dem Messgerät nicht vorhanden.',
+  410:'Diese Messung wurde fristgemäß bzw. manuell vom Messgerät gelöscht. Der Bericht ist hier nicht mehr verfügbar.',
+};
+let reportRequest=0;
+async function openReport(id,name){
+  const view=el('report-viewer'),frame=el('report-frame'),state=el('report-state-msg'),printBtn=el('report-print');
+  const token=++reportRequest;
+  el('report-title').textContent='Messbericht'+(name?' · '+name:'');
+  frame.classList.add('hidden');frame.removeAttribute('srcdoc');printBtn.disabled=true;
+  state.className='alert';state.textContent='Bericht wird geladen …';state.classList.remove('hidden');
+  view.classList.remove('hidden');document.body.classList.add('report-open');el('report-back').focus();
+  let res;
+  try{res=await fetch('api/v2/sessions/'+encodeURIComponent(id)+'/report',{credentials:'same-origin',cache:'no-store'})}
+  catch(_){if(token!==reportRequest)return;state.className='alert error';state.textContent='Keine Verbindung zu AutoBalance. Netzwerk prüfen und erneut versuchen.';return}
+  if(token!==reportRequest)return;
+  if(!res.ok){
+    state.className='alert error';
+    state.textContent=REPORT_ERRORS[res.status]||(res.status>=500?'Serverfehler beim Erstellen des Berichts (HTTP '+res.status+'). Bitte später erneut versuchen.':'Bericht konnte nicht geladen werden (HTTP '+res.status+').');
+    return;
+  }
+  const html=await res.text();if(token!==reportRequest)return;
+  frame.onload=()=>{
+    try{const d=frame.contentDocument;d.querySelectorAll('.noprint').forEach(n=>n.remove())}catch(_){}   // own print button instead
+    state.classList.add('hidden');frame.classList.remove('hidden');printBtn.disabled=false;
+  };
+  frame.srcdoc=html;
+}
+function closeReport(){reportRequest++;el('report-viewer').classList.add('hidden');document.body.classList.remove('report-open');el('report-frame').removeAttribute('srcdoc')}
+function printReport(){
+  try{el('report-frame').contentWindow.focus();el('report-frame').contentWindow.print()}
+  catch(_){notice('Drucken ist in dieser Ansicht nicht möglich. Bitte Browser-Druckfunktion verwenden.',true)}
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!el('report-viewer').classList.contains('hidden'))closeReport()});
+el('report-back').addEventListener('click',closeReport);el('report-print').addEventListener('click',printReport);
 /* ---------- AB-013/AB-024 Messungen: beginnen, stoppen, später drucken ---------- */
 let sessionsData=null;
 function roomListText(rooms){return (rooms.filter(r=>r.sensors?r.sensors.length:r.temperature_sensors.length).map(r=>r.name).join(', ')||'–')}
 function jobLinks(s){
   const box=document.createElement('span');box.className='job-links';
-  const rep=document.createElement('a');rep.className='job-report';rep.href='api/v2/sessions/'+encodeURIComponent(s.id)+'/report';rep.target='_blank';rep.rel='noopener';rep.textContent='Bericht drucken';
+  const rep=document.createElement('button');rep.type='button';rep.className='job-report';rep.textContent='Messbericht ansehen';
+  rep.addEventListener('click',()=>openReport(s.id,s.name));
   const csv=document.createElement('a');csv.href='api/v2/sessions/'+encodeURIComponent(s.id)+'/export.csv';csv.setAttribute('download','');csv.textContent='CSV';
   const show=document.createElement('button');show.type='button';show.textContent='Auswertung anzeigen';show.addEventListener('click',()=>{renderAssessment(s.id);el('assessment').scrollIntoView({block:'start'})});
   box.append(rep,document.createTextNode(' · '),csv,document.createTextNode(' '),show);return box;
@@ -1190,7 +1237,8 @@ async function renderAssessment(id){
   rooms.textContent='Räume in geeigneten Nächten (Median Ist − Soll): '+r.rooms.map(x=>x.name+' '+(x.monitored?(x.deviation_median_k===null?'keine Daten':(x.deviation_median_k>0?'+':'')+num1(x.deviation_median_k)+' K'+(x.stationary===false?' (nicht stationär)':'')):'nicht überwacht')).join(' · ');
   root.append(rooms);
   const links=document.createElement('div');links.className='actions';
-  const rep=document.createElement('a');rep.id='report-link';rep.href='api/v2/sessions/'+encodeURIComponent(id)+'/report';rep.target='_blank';rep.rel='noopener';rep.textContent='Messbericht öffnen (druckbar)';
+  const rep=document.createElement('button');rep.type='button';rep.id='report-link';rep.textContent='Messbericht ansehen';
+  rep.addEventListener('click',()=>openReport(id,(sessionsData&&[sessionsData.active,...sessionsData.sessions].find(x=>x&&x.id===id)||{}).name));
   const csv=document.createElement('a');csv.href='api/v2/sessions/'+encodeURIComponent(id)+'/export.csv';csv.setAttribute('download','');csv.textContent='Messwerte dieser Messung (CSV)';
   links.append(rep,document.createTextNode(' · '),csv);root.append(links);
   const note=document.createElement('p');note.className='hint';note.textContent='Pilotregelwerk (Schwellen noch im Feld zu bestätigen). AutoBalance berechnet keine Parameteränderung und schreibt nichts an die Wärmepumpe.';root.append(note);
