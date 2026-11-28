@@ -1,4 +1,4 @@
-# Jodeit AutoBalance Pro v0.6.0
+# Jodeit AutoBalance Pro v0.6.1
 
 **Stand 20.11.2026: Erste lauffähige, rein lesende Home-Assistant-App. Nicht für automatische Heizungssteuerung freigegeben.**
 
@@ -86,6 +86,13 @@ Regeln (Review ChatGPT 12):
   Kundendaten ohne vorher extern verwahrte Liste der gelöschten Messungs-IDs (`/share/autobalance/…json`); nach
   einer Wiederherstellung vor der nächsten Kundenmessung bereinigen und prüfen. HA-Sicherungen auf dem Messkoffer
   dokumentiert der Techniker und ersetzt/löscht sie bei Fälligkeit gezielt (Betriebsanweisung in Outline).
+
+## Änderungen in v0.6.1 (freigegeben 28.11.2026)
+
+- AB-030 Teil 1: „Messbericht ansehen“ öffnet den Bericht in einem internen Vollbild-Viewer derselben
+  Home-Assistant-Sitzung (vorher neuer Tab → in der HA-iOS-App „Unauthorized“). Eigener Druck-/PDF-Knopf,
+  getrennte Meldungen für Anmeldung, nicht vorhanden, gelöscht, Serverfehler, keine Verbindung und
+  unvollständige Übertragung. Bericht-Endpunkt und festgeschriebene Berichte unverändert.
 
 ## Änderungen in v0.6.0 (freigegeben 27.11.2026)
 
