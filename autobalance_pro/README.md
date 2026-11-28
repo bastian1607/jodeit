@@ -87,6 +87,21 @@ Regeln (Review ChatGPT 12):
   einer Wiederherstellung vor der nächsten Kundenmessung bereinigen und prüfen. HA-Sicherungen auf dem Messkoffer
   dokumentiert der Techniker und ersetzt/löscht sie bei Fälligkeit gezielt (Betriebsanweisung in Outline).
 
+## Änderungen in v0.6.3 (freigegeben 28.11.2026)
+
+Weiterhin rein lesend. Laufende Messungen werden mit den neuen Regeln rückwirkend ausgewertet; festgeschriebene
+Berichte abgeschlossener Messungen bleiben unverändert. Keine Datenbankänderung.
+
+- AB-032: Gedämpfte Außentemperatur, Vorlauf-Soll und alle Mess-/Regelwerte in °C des Geräteprofils werden als Zahl
+  gespeichert (vorher nur als Text: Abdeckung 0 %, keine auswertbare Nacht). Ältere Werte werden beim Auswerten
+  aus dem gespeicherten Rohwert gelesen. Reglereinstellungen bleiben wie gemeldet.
+- AB-033: Kurze EMS-ESP-Aussetzer („nicht verfügbar“) gelten nicht mehr als Änderung der Reglerparameter
+  (vorher neuer Auswertungsabschnitt und 120 min Sperre je Aussetzer).
+- AB-034: Nachtregel Pilot v2. Eine Nacht zählt mit mindestens 4 h ungestörten, gültigen Messwerten in Abschnitten
+  von mindestens 30 min (bei mehreren mindestens zwei von 60 min) statt 4 h am Stück. Abtauung: aktive Phase plus
+  30 min, wenn der Vorlauf wieder erholt ist, sonst 60 min. Warmwasser unverändert plus 60 min. Der Bericht zeigt
+  gezählte Stunden, Abschnitte und Abtauungen je Nacht sowie die Regelversion.
+
 ## Änderungen in v0.6.2 (freigegeben 28.11.2026)
 
 - AB-030 Teil 2: Ergebnisbericht im Layout v2. Seite 1 ist ein vollständiges A4-Kundenblatt mit Jodeit-Logo,

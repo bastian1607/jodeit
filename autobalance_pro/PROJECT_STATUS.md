@@ -6,6 +6,12 @@
 - Code: [bastian1607/jodeit – autobalance_pro](https://github.com/bastian1607/jodeit/tree/main/autobalance_pro), maßgeblich ist `main`.
 - Outline: [Pilotplanung](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD) · [Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS) · [AB-008 Datenmodell v2](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt) · [AB-009 Oberfläche](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-009-ubergabe-an-chatgpt-oberflache-fur-datenmodell-v2-wF0mbKy2cy) · [Zusammenarbeit](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM); Kurzregeln: [CLAUDE.md](CLAUDE.md).
 
+## Stand v0.6.3 (Release freigegeben von Bastian am 28.11.2026)
+
+- AB-032/AB-033 (PR #30) und AB-034 Nachtregel Pilot v2 (PR #31); Reviews ChatGPT 19–20.
+- Tests: 258 lokale Tests inkl. Chromium auf `main` `dc01247`; Vorher/Nachher mit echten Daten der Messung vom 27./28.11. nachgerechnet.
+- Offen: AB-031 (gesperrt), AB-028; Härtung AB-033 (Zahlvergleich 54 vs. 54.0, ChatGPT P2).
+
 ## Stand v0.6.2 (Release freigegeben von Bastian am 28.11.2026)
 
 - AB-030 Teil 2, Berichtslayout v2 (PR #28); Reviews ChatGPT 18 inkl. Nachbesserung.
