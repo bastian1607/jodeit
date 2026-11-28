@@ -113,6 +113,15 @@ def temperature_entities(heat_source):
     return {i for i, f in entities(heat_source).items() if f["kind"] == "measurement" and f["unit"] == "°C"}
 
 
+def numeric_temperature_entities(heat_source):
+    """AB-032: measured and derived °C values of the profile are stored as numbers.
+
+    Only "measurement" fields get the timestamp/age check (temperature_entities); derived values such as the
+    damped outdoor temperature or the flow target report on change only. Controller settings ("setting") stay
+    as reported (parameter display and AB-029 comparison unchanged)."""
+    return {i for i, f in entities(heat_source).items() if f["unit"] == "°C" and f["kind"] in ("measurement", "derived")}
+
+
 # ------------------------------------------------------------------ validation
 
 _HOSTNAME = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)*$")
