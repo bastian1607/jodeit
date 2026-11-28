@@ -19,8 +19,10 @@ Time model: the app polls every 5 minutes; every stored poll is a "tick". Ticks 
                  heating not active, parameter/target change (+120 min)
     invalid    – tick present but outdoor, flow or every monitored room value missing/invalid
     ok         – usable for a quasi-stationary comparison
-A night (22:00–06:00 local time) is valid if it contains a 4-hour window without disturbed slots
-and with ≥ 80 % ok slots.
+A night (22:00–06:00 local time) is valid (AB-034, pilot v2) if its undisturbed blocks (≥ 30 min, ≥ 80 % ok,
+internal gaps ≤ 10 min, inside one evaluation segment) contain either one block of ≥ 4 h or ≥ 4 h of ok slots
+in total with at least two blocks of ≥ 60 min. Defrost: the active phase plus 30 min if the flow temperature
+has recovered, otherwise 60 min (the night is then marked "nicht stationär nach Abtauung").
 """
 import bisect
 import statistics
@@ -29,13 +31,19 @@ from datetime import datetime, time, timedelta, timezone
 THRESHOLDS = {
     "slot_minutes": 5,
     "night_start_hour": 22, "night_end_hour": 6,
-    "night_window_hours": 4, "night_window_ok_share": 0.8,
     "technical_coverage": 0.85, "long_outage_hours": 6,
     "nights_level": 3, "nights_slope": 4, "nights_per_group": 2, "slope_band_k": 8.0,
-    "window_after_min": 90, "dhw_after_min": 60, "defrost_after_min": 60, "change_after_min": 120,
+    "window_after_min": 90, "dhw_after_min": 60, "change_after_min": 120,
+    # AB-034 (ChatGPT Auftrag 20, confirmed by Bastian 28.11.2026): defrost after-run 30 min if the flow
+    # temperature is back within ±2 K of its pre-defrost median (15 min) in two consecutive polls, else 60 min.
+    "defrost_after_min": 30, "defrost_after_max_min": 60, "defrost_recovery_k": 2.0, "defrost_pre_min": 15,
+    # AB-034 night rule: blocks of undisturbed slots instead of one contiguous 4-hour window.
+    "night_min_ok_hours": 4.0, "block_min_minutes": 30, "block_long_minutes": 60, "blocks_long_needed": 2,
+    "block_max_gap_minutes": 10, "block_ok_share": 0.8,
     "trend_k_per_h": 0.15, "disagree_k": 1.0,
 }
 SLOT = timedelta(minutes=THRESHOLDS["slot_minutes"])
+RULE_VERSION = "AB-014 Pilot v2 (AB-034, 28.11.2026)"
 
 RESTRICTED_LABEL = "Vorläufig · fachlich eingeschränkt"
 STAGE_TEXT = {
@@ -72,9 +80,110 @@ def _state(cell):
     return str(cell.get("s", "")).strip().lower() if cell else ""
 
 
+def parameter_changes(ticks, values, params):
+    """AB-033: a parameter changes only if a valid value differs from its last valid value.
+
+    "unavailable"/"unknown" (e.g. a short EMS-ESP dropout) is a gap, not a change; the value after the gap is
+    compared with the last valid value before it."""
+    last, out = {}, []
+    for t in ticks:
+        row = values.get(t, {})
+        diff = []
+        for p in params:
+            s = _state(row.get(p))
+            if s in UNKNOWN_STATES:
+                continue
+            if p in last and last[p] != s:
+                diff.append(p)
+            last[p] = s
+        if diff:
+            out.append({"at": t, "kind": "parameter", "detail": diff})
+    return out
+
+
 def _intervals_after(times, minutes):
     """Disturbance from an observed tick until one poll later (state may last that long) + after-run."""
     return [(t, t + SLOT + timedelta(minutes=minutes)) for t in times]
+
+
+def _defrost_intervals(defrost_ticks, ticks, values, flow_role, th):
+    """AB-034: (start, end, recovered) per defrost episode. Consecutive defrost polls form one episode.
+
+    The poll before the episode is excluded as uncertain transition. After the episode (+ one slot) the phase
+    lasts at least ``defrost_after_min``; it ends then only if the flow temperature was back within
+    ``defrost_recovery_k`` of the median of the ``defrost_pre_min`` before the episode in two consecutive polls,
+    otherwise it lasts ``defrost_after_max_min`` and the episode counts as not recovered."""
+    marked = set(defrost_ticks)
+    episodes, cur = [], []
+    for t in ticks:
+        if t in marked:
+            cur.append(t)
+        elif cur:
+            episodes.append(cur)
+            cur = []
+    if cur:
+        episodes.append(cur)
+    flow = lambda t: _num(values.get(t, {}).get(flow_role)) if flow_role else None
+    out = []
+    for ep in episodes:
+        begin, end = ep[0], ep[-1] + SLOT
+        min_end = end + timedelta(minutes=th["defrost_after_min"])
+        max_end = end + timedelta(minutes=th["defrost_after_max_min"])
+        pre = [flow(t) for t in ticks if begin - timedelta(minutes=th["defrost_pre_min"]) <= t < begin - SLOT]
+        ref = _median([v for v in pre if v is not None])
+        until, recovered = max_end, False
+        if ref is not None:
+            after = [t for t in ticks if end <= t < max_end]
+            for t1, t2 in zip(after, after[1:]):
+                v1, v2 = flow(t1), flow(t2)
+                if t2 - t1 <= 2 * SLOT and v1 is not None and v2 is not None \
+                        and abs(v1 - ref) <= th["defrost_recovery_k"] and abs(v2 - ref) <= th["defrost_recovery_k"]:
+                    until, recovered = max(min_end, t2), True
+                    break
+        out.append((begin - SLOT, until, recovered))
+    return out
+
+
+def _night_blocks(ns, th):
+    """AB-034: undisturbed blocks of a night. ns: [(slot_start, tick|None, state)].
+
+    A block is split by a disturbed slot or by more than ``block_max_gap_minutes`` of missing/invalid slots;
+    it starts and ends with an ok slot. Returns [(start, end, ok_ticks, valid)]."""
+    max_gap = th["block_max_gap_minutes"] // th["slot_minutes"]
+    blocks, cur, pending = [], [], []
+
+    def close():
+        if cur:
+            length = cur[-1][0] + SLOT - cur[0][0]
+            ok = [x[1] for x in cur if x[2] == "ok"]
+            valid = (length >= timedelta(minutes=th["block_min_minutes"])
+                     and len(ok) >= th["block_ok_share"] * len(cur))
+            blocks.append((cur[0][0], cur[-1][0] + SLOT, ok, valid))
+        cur.clear()
+        pending.clear()
+    for slot in ns:
+        if slot[2] == "disturbed":
+            close()
+        elif slot[2] == "ok":
+            cur.extend(pending)
+            pending.clear()
+            cur.append(slot)
+        elif cur:
+            pending.append(slot)
+            if len(pending) > max_gap:
+                close()
+    close()
+    return blocks
+
+
+def _night_qualifies(blocks, th):
+    """One block of ≥ 4 h, or ≥ 4 h of ok slots with at least two blocks of ≥ 60 min (AC20-01…03)."""
+    need = timedelta(hours=th["night_min_ok_hours"])
+    if any(b - a >= need for a, b, _, valid in blocks if valid):
+        return True
+    ok_time = sum(len(ok) for _, _, ok, valid in blocks if valid) * SLOT
+    long_blocks = sum(1 for a, b, _, valid in blocks if valid and b - a >= timedelta(minutes=th["block_long_minutes"]))
+    return ok_time >= need and long_blocks >= th["blocks_long_needed"]
 
 
 def _in_any(intervals, t):
@@ -135,22 +244,28 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
 
     # ---- events: DHW, defrost, parameter and target changes
     dhw_ticks, defrost_ticks, heating_off, changes = [], [], set(), []
-    previous_params = None
+    changes.extend(parameter_changes(ticks, values, roles.get("params", [])))
+    in_dhw = in_defrost = False
     for t in ticks:
         row = values.get(t, {})
         activity = _state(row.get(roles["hp_activity"])) if roles.get("hp_activity") else ""
-        if (roles.get("dhw") and _state(row.get(roles["dhw"])) == "on") or any(w in activity for w in DHW_WORDS):
+        activity_known = bool(roles.get("hp_activity")) and activity not in UNKNOWN_STATES
+        dhw_state = _state(row.get(roles["dhw"])) if roles.get("dhw") else ""
+        # AB-034: a DHW/defrost phase lasts through status gaps until a valid status shows it has ended
+        if dhw_state == "on" or any(w in activity for w in DHW_WORDS):
+            in_dhw = True
+        elif dhw_state == "off" or activity_known:
+            in_dhw = False
+        if in_dhw:
             dhw_ticks.append(t)
         if any(w in activity for w in DEFROST_WORDS):
+            in_defrost = True
+        elif activity_known:
+            in_defrost = False
+        if in_defrost:
             defrost_ticks.append(t)
         if roles.get("heating_active") and _state(row.get(roles["heating_active"])) == "off":
             heating_off.add(t)
-        params = tuple(_state(row.get(p)) for p in roles.get("params", []))
-        if previous_params is not None and params != previous_params and all(params) and all(previous_params):
-            changes.append({"at": t, "kind": "parameter",
-                            "detail": [p for p, a, b in zip(roles.get("params", []), previous_params, params) if a != b]})
-        if all(params):
-            previous_params = params
     prev_targets = None
     for at, cfg in history:
         targets = {r["id"]: (r.get("name"), r.get("target")) for r in cfg.get("rooms", [])}
@@ -161,7 +276,8 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         prev_targets = targets
     changes.sort(key=lambda c: c["at"])
     dhw_iv = _intervals_after(dhw_ticks, th["dhw_after_min"])
-    defrost_iv = _intervals_after(defrost_ticks, th["defrost_after_min"])
+    defrost_ep = _defrost_intervals(defrost_ticks, ticks, values, roles.get("flow"), th)
+    defrost_iv = [(a, b) for a, b, _ in defrost_ep]
     change_iv = _intervals_after([c["at"] for c in changes], th["change_after_min"])
 
     # window contacts per room: open intervals incl. 90 min after closing
@@ -215,6 +331,8 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         if reasons:
             state = "disturbed"
         elif outdoor is None or flow is None or not usable_rooms:
+            # AC20-05: an unknown operating status is no confirmed heating/undisturbed state; this is checked
+            # per night via heating_verified / disturbances_verified (Review 7 keeps "technically valid" separate)
             state = "invalid"
         else:
             state = "ok"
@@ -234,13 +352,14 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         slots.append((cursor, hit, tick_info[hit]["state"] if hit else "missing"))
         cursor = nxt
 
+    # ---- segments: a parameter/target change starts a new evaluation section (no mixing)
+    boundaries = [start] + [c["at"] for c in changes]
+    seg_of = lambda t: max(i for i, b in enumerate(boundaries) if b <= max(t, start))
     nights = []
     if slots:
         first_local = start.astimezone(tz).date() - timedelta(days=1)
         last_local = end.astimezone(tz).date()
         day = first_local
-        window_len = int(th["night_window_hours"] * 60 / th["slot_minutes"])
-        need_ok = int(window_len * th["night_window_ok_share"] + 0.9999)
         while day <= last_local:
             n_start = datetime.combine(day, time(th["night_start_hour"]), tz).astimezone(timezone.utc)
             n_end = datetime.combine(day + timedelta(days=1), time(th["night_end_hour"]), tz).astimezone(timezone.utc)
@@ -250,36 +369,38 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
             ns = [s for s in slots if n_start <= s[0] < n_end]
             if not ns:
                 continue
-            best = None
-            for i in range(0, max(0, len(ns) - window_len) + 1):
-                win = ns[i:i + window_len]
-                if len(win) < window_len:
-                    break
-                ok = sum(1 for s in win if s[2] == "ok")
-                if not any(s[2] == "disturbed" for s in win) and ok >= need_ok:
-                    best = (win[0][0], win[-1][0] + SLOT)
-                    break
+            n_end_seg = seg_of(max(n_end - SLOT, start))
+            blocks = _night_blocks(ns, th)
+            valid_blocks = [x for x in blocks if x[3]]
+            seg = max((seg_of(x[0]) for x in valid_blocks), default=n_end_seg)
+            # AC20-07: never add up hours across a real parameter/target change
+            counted = [x for x in valid_blocks if seg_of(x[0]) == seg]
+            qualifies = _night_qualifies(counted, th)
             ok_ticks = [s[1] for s in ns if s[2] == "ok"]
-            outdoor = [tick_info[t]["outdoor"] for t in ok_ticks]
-            outdoor_raw = [tick_info[t]["outdoor_raw"] for t in ok_ticks if tick_info[t]["outdoor_raw"] is not None]
+            in_window = [t for x in counted for t in x[2]] if qualifies else []
+            basis = in_window or ok_ticks           # descriptive values of an unsuitable night: all ok polls
+            outdoor = [tick_info[t]["outdoor"] for t in basis]
+            outdoor_raw = [tick_info[t]["outdoor_raw"] for t in basis if tick_info[t]["outdoor_raw"] is not None]
             reasons = sorted({r for s in ns if s[1] for r in tick_info[s[1]]["reasons"]})
-            in_window = [t for t in ok_ticks if best and best[0] <= t < best[1]]
             share = lambda key: (sum(1 for t in in_window if tick_info[t][key]) / len(in_window)) if in_window else 0.0
+            episodes = [e for e in defrost_ep if n_start <= e[0] + SLOT < n_end]
             nights.append({
-                "heating_verified": best is not None and share("heating") >= STATUS_SHARE,
-                "disturbances_verified": best is not None and share("disturbances_known") >= STATUS_SHARE,
+                "heating_verified": qualifies and share("heating") >= STATUS_SHARE,
+                "disturbances_verified": qualifies and share("disturbances_known") >= STATUS_SHARE,
                 "date": (day - timedelta(days=1)).isoformat(), "start": n_start.isoformat(), "end": n_end.isoformat(),
-                "valid": best is not None, "valid_window": [best[0].isoformat(), best[1].isoformat()] if best else None,
+                "valid": qualifies, "segment": seg,
+                "valid_window": [counted[0][0].isoformat(), counted[-1][1].isoformat()] if qualifies else None,
+                "blocks": [{"start": x[0].isoformat(), "end": x[1].isoformat(), "ok_hours": round(len(x[2]) * th["slot_minutes"] / 60, 2),
+                            "counted": qualifies and x in counted} for x in valid_blocks],
+                "counted_hours": round(len(in_window) * th["slot_minutes"] / 60, 1),
                 "ok_hours": round(len(ok_ticks) * th["slot_minutes"] / 60, 1),
                 "missing_share": round(sum(1 for s in ns if s[2] == "missing") / len(ns), 2),
                 "outdoor_median": _median(outdoor), "outdoor_raw_median": _median(outdoor_raw),
-                "disturbances": reasons, "_ok_ticks": ok_ticks, "_start": n_start, "_end": n_end, "_vw": best,
+                "defrost_events": len(episodes), "defrost_unrecovered": sum(1 for e in episodes if not e[2]),
+                "disturbances": reasons, "_ok_ticks": ok_ticks, "_start": n_start, "_end": n_end,
+                "_blocks": [(x[0], x[1], x[2]) for x in counted] if qualifies else [],
             })
 
-    # ---- segments: a parameter/target change starts a new evaluation section (no mixing)
-    boundaries = [start] + [c["at"] for c in changes]
-    for n in nights:
-        n["segment"] = max(i for i, b in enumerate(boundaries) if b <= max(n["_end"] - SLOT, start))
     current_segment = len(boundaries) - 1
     valid_current = [n for n in nights if n["segment"] == current_segment and n["valid"]]
     # Only nights with confirmed heating operation count for level and slope (AC6-02).
@@ -320,13 +441,13 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
     for r in last_cfg.get("rooms", []):
         devs, trends = [], []
         for n in current:
-            a, b = n["_vw"]
-            pts = [(t, tick_info[t]["rooms"][r["id"]]) for t in n["_ok_ticks"]
-                   if a <= t < b and r["id"] in tick_info[t]["rooms"] and tick_info[t]["rooms"][r["id"]]["ok"]]
-            devs += [x["value"] - float(x["target"]) for _, x in pts if x["target"] is not None]
-            slope = _slope([(t, x["value"]) for t, x in pts])
-            if slope is not None:
-                trends.append(slope)
+            for _, _, block_ticks in n["_blocks"]:          # AC20-09: trends never bridge a disturbance
+                pts = [(t, tick_info[t]["rooms"][r["id"]]) for t in block_ticks
+                       if r["id"] in tick_info[t]["rooms"] and tick_info[t]["rooms"][r["id"]]["ok"]]
+                devs += [x["value"] - float(x["target"]) for _, x in pts if x["target"] is not None]
+                slope = _slope([(t, x["value"]) for t, x in pts])
+                if slope is not None:
+                    trends.append(slope)
         monitored = bool(r.get("temperature_sensors"))
         trend = _median(trends)
         room_results.append({"id": r["id"], "name": r["name"], "target": r.get("target"), "monitored": monitored,
@@ -382,7 +503,7 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         reasons.append("Messung läuft noch – Ergebnis vorläufig.")
 
     for n in nights:
-        for key in ("_ok_ticks", "_start", "_end", "_vw"):
+        for key in ("_ok_ticks", "_start", "_end", "_blocks"):
             n.pop(key, None)
     raw_diffs = [n["outdoor_raw_median"] - n["outdoor_median"] for n in nights
                  if n["outdoor_raw_median"] is not None and n["outdoor_median"] is not None and roles.get("outdoor_damped")]
@@ -392,7 +513,9 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
         # Review 8: without verified DHW/defrost coverage a level/slope statement is only provisional.
         "restricted": disturbance_notice is not None, "restricted_label": RESTRICTED_LABEL if disturbance_notice else None,
         "disturbances_verified": disturbance_checked,
-        "nights": nights, "technical_nights": len(valid_current), "valid_nights": len(current), "valid_hours": round(sum(n["ok_hours"] for n in current), 1),
+        "nights": nights, "technical_nights": len(valid_current), "valid_nights": len(current), "valid_hours": round(sum(n["counted_hours"] for n in current), 1),
+        "rule_version": RULE_VERSION,
+        "defrost": {"events": len(defrost_ep), "unrecovered": sum(1 for e in defrost_ep if not e[2])},
         "outdoor_band": {"min": sorted_band[0] if band else None, "max": sorted_band[-1] if band else None,
                          "span_k": round(sorted_band[-1] - sorted_band[0], 1) if band else None,
                          "damped": bool(roles.get("outdoor_damped")),

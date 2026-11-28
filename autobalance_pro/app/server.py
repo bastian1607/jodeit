@@ -219,12 +219,27 @@ def age_seconds(timestamp,now=None):
 def temperature_ids(d):
     return model.temperature_entities_of(_as_v2(d))|devices.temperature_entities(heat_source(d))
 
-def quality(e,is_temperature,now):
+def numeric_ids(d):
+    """AB-032: entities stored as a number in °C (room/circuit sensors and all °C fields of the profile)."""
+    return temperature_ids(d)|devices.numeric_temperature_entities(heat_source(d))
+
+def legacy_number(state,unit):
+    """AB-032: number from a stored raw state when an older version kept no normalized value. Read only."""
+    if unit not in ("°C","°F"):return None
+    try:v=float(state)
+    except (TypeError,ValueError,OverflowError):return None
+    if not math.isfinite(v):return None
+    if unit=="°F":v=(v-32)*5/9
+    return v if -60<=v<=150 else None
+
+def quality(e,is_temperature,now,numeric=None):
+    """is_temperature: number + timestamp check. numeric (AB-032): number only, reported on change (no age check)."""
+    numeric=is_temperature if numeric is None else (numeric or is_temperature)
     value=e.get("state","unavailable")
     normalized=None
     unit=None
     if value in ("unknown","unavailable",""):return (value or "unavailable"),normalized,unit
-    if is_temperature:
+    if numeric:
         try:normalized=float(value)
         except (TypeError,ValueError,OverflowError):return "invalid_number",None,None
         if not math.isfinite(normalized):return "invalid_number",None,None
@@ -275,14 +290,14 @@ def sample():
             state.update(rest)
             HEAT_SOURCE_STATUS.update(at=at,errors=errors)
             if errors:logging.warning("EMS-ESP-Abfrage unvollständig: %s",errors)
-        temps=temperature_ids(d)
+        temps=temperature_ids(d);numeric=numeric_ids(d)
         with connect() as c:
             active=c.execute("SELECT id FROM sessions WHERE ended_at IS NULL LIMIT 1").fetchone()
         job=active[0] if active else None   # AB-025: samples of a measuring job are tagged with its id
         vals=[]
         for entity in desired:
             e=state.get(entity,{})
-            code,normalized,unit=quality(e,entity in temps,now)
+            code,normalized,unit=quality(e,entity in temps,now,entity in numeric)
             vals.append((at,entity,e.get("state","unavailable"),e.get("unit",""),int(code=="ok"),e.get("source_at"),code,normalized,unit,job,e.get("source_at_kind")))
         with connect() as c:
             c.executemany("INSERT INTO samples(at,entity_id,state,unit,valid,source_at,quality,normalized_value,normalized_unit,session_id,source_at_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?)",vals)
@@ -885,8 +900,9 @@ def session_assessment(sid,now=None):
     with connect() as c:
         # AB-025: only samples recorded for this job – never global or other customers' data.
         tick_rows=[r[0] for r in c.execute("SELECT DISTINCT at FROM samples WHERE session_id=? ORDER BY at",(sid,))]
-        for at,eid,state,valid,q,nv in c.execute("SELECT at,entity_id,state,valid,quality,normalized_value FROM samples WHERE session_id=?",(sid,)):
+        for at,eid,state,unit,valid,q,nv in c.execute("SELECT at,entity_id,state,unit,valid,quality,normalized_value FROM samples WHERE session_id=?",(sid,)):
             if eid not in ids:continue
+            if nv is None and valid and q in (None,"ok"):nv=legacy_number(state,unit)   # AB-032: samples before v0.6.3
             t=coverage.parse(at)
             if t is None:continue
             values.setdefault(t,{})[eid]={"v":nv,"s":state,"ok":bool(valid) and (q in (None,"ok"))}
@@ -956,10 +972,14 @@ def curve_points(sid,cfg,limit=2000):
     meta={"n":0,"from":None,"to":None,"target":target,"outdoor":outdoor}
     if not target or not outdoor:return [],damped,meta
     with connect() as c:
-        rows=c.execute("""SELECT o.normalized_value,t.normalized_value,t.at FROM samples t JOIN samples o
+        raw=c.execute("""SELECT o.normalized_value,o.state,o.unit,t.normalized_value,t.state,t.unit,t.at FROM samples t JOIN samples o
             ON o.at=t.at AND o.session_id=t.session_id WHERE t.session_id=? AND t.entity_id=? AND o.entity_id=?
-            AND t.valid=1 AND o.valid=1 AND t.normalized_value IS NOT NULL AND o.normalized_value IS NOT NULL ORDER BY t.at""",
-            (sid,target,outdoor)).fetchall()
+            AND t.valid=1 AND o.valid=1 ORDER BY t.at""",(sid,target,outdoor)).fetchall()
+    rows=[]
+    for onv,ost,ou,tnv,tst,tu,at in raw:            # AB-032: older samples kept only the raw state
+        o=onv if onv is not None else legacy_number(ost,ou)
+        t=tnv if tnv is not None else legacy_number(tst,tu)
+        if o is not None and t is not None:rows.append((o,t,at))
     if rows:meta.update(n=len(rows),**{"from":rows[0][2],"to":rows[-1][2]})
     step=max(1,-(-len(rows)//limit))
     return [(float(a),float(b)) for a,b,_ in rows[::step]],damped,meta
