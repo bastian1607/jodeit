@@ -258,11 +258,14 @@ class AcceptanceTests(V2Browser):
         expect(self.page.locator("#session-form")).to_be_visible()
         history = self.page.locator("#session-history")
         expect(history).to_contain_text("Müller · Angebot 2026-123 <Test>")
-        with self.page.expect_popup() as popup:
-            history.locator(".job-report").first.click()
-        expect(popup.value.locator("body")).to_contain_text("Notiz: Schlüssel beim Nachbarn")
-        expect(popup.value.locator("body")).to_contain_text("Müller · Angebot 2026-123 <Test>")
-        popup.value.close()
+        pages = len(self.page.context.pages)
+        history.locator(".job-report").first.click()                       # AB-030: in-app viewer, no new tab
+        frame = self.page.frame_locator("#report-frame")
+        expect(frame.locator("body")).to_contain_text("Notiz: Schlüssel beim Nachbarn")
+        expect(frame.locator("body")).to_contain_text("Müller · Angebot 2026-123 <Test>")
+        self.assertEqual(len(self.page.context.pages), pages)
+        self.page.click("#report-back")
+        expect(self.page.locator("#report-viewer")).to_be_hidden()
         self.shot("ab013-raeume-messauftrag")
 
     def test_ac03_zones(self):
@@ -637,18 +640,106 @@ class AcceptanceTests(V2Browser):
             self.assertNotIn(forbidden, content)
         self.shot("ab014-auswertung")
         # AC-06: report opens from step 5; AC-020-11: dashboard shows coverage since job start
-        with self.page.expect_popup() as popup:
-            self.page.click("#report-link")
-        report = popup.value
+        pages = len(self.page.context.pages)
+        self.page.click("#report-link")
+        report = self.page.frame_locator("#report-frame")
         expect(report.locator("#report-result")).to_contain_text("Heizbetrieb nicht nachgewiesen")
         expect(report.locator("body")).to_contain_text("Nicht überwachte Räume: Bad")
-        if os.environ.get("AUTO_BALANCE_SCREENSHOTS"):
-            report.screenshot(path=str(Path(os.environ["AUTO_BALANCE_SCREENSHOTS"]) / "ab020-messbericht.png"), full_page=True)
-        report.close()
+        expect(report.locator(".noprint")).to_have_count(0)                 # own print action in the viewer
+        expect(self.page.locator("#report-print")).to_be_enabled()
+        self.assertEqual(len(self.page.context.pages), pages)                # AC-030-01/08: no external tab
+        self.assertEqual(self.page.locator("#report-frame").get_attribute("sandbox"), "allow-same-origin allow-modals")
+        self.shot("ab030-berichtviewer")
+        self.page.keyboard.press("Escape")
+        expect(self.page.locator("#report-viewer")).to_be_hidden()
         self.tab("Übersicht")
         expect(self.page.locator("#stats")).to_contain_text("Abdeckung seit Messbeginn")
         expect(self.page.locator("#stats")).to_contain_text("Ziel: 7 Tage")
         self.assertNotIn("Abdeckung 7 Tage", self.page.locator("#stats").inner_text())
+
+
+    def test_ab030_report_viewer_error_states(self):
+        """AC-030-03: 401/403, 404, 410, 5xx and network errors are shown distinctly, never an empty window."""
+        self.seed(rooms=("Wohnzimmer",))
+        job = server.start_session({"name": "J-1", "confirmed": True})
+        self.open()
+        self.tab("5 Prüfen & Messung")
+        cases = [(401, "Anmeldung abgelaufen"), (403, "Anmeldung abgelaufen"), (404, "nicht vorhanden"),
+                 (410, "vom Messgerät gelöscht"), (500, "Serverfehler beim Erstellen des Berichts (HTTP 500)")]
+        for status, text in cases:
+            self.page.route("**/report", lambda route, *_, s=status: route.fulfill(status=s, body="x"))
+            self.page.evaluate("([id]) => { openReport(id, 'J-1'); }", [job["id"]])
+            expect(self.page.locator("#report-state-msg")).to_contain_text(text)
+            expect(self.page.locator("#report-frame")).to_be_hidden()
+            expect(self.page.locator("#report-print")).to_be_disabled()
+            self.page.click("#report-back")
+            self.page.unroute("**/report")
+        self.page.route("**/report", lambda route, *_: route.abort())
+        self.page.evaluate("([id]) => { openReport(id, 'J-1'); }", [job["id"]])
+        expect(self.page.locator("#report-state-msg")).to_contain_text("Keine Verbindung zu AutoBalance")
+        self.page.unroute("**/report")
+        self.page.click("#report-back")
+        server.stop_session(job["id"])                                      # AC-030-04: frozen report after stop
+        server.delete_session(job["id"], "manuell")
+        self.page.evaluate("([id]) => { openReport(id, 'J-1'); }", [job["id"]])   # real 410 from the server
+        expect(self.page.locator("#report-state-msg")).to_contain_text("vom Messgerät gelöscht")
+
+
+    def test_review16_report_loading_lifecycle(self):
+        """AC16-01..03: delayed second report, closing while loading, broken body after HTTP 200."""
+        self.seed(rooms=("Wohnzimmer",))
+        a = server.start_session({"name": "Auftrag A", "confirmed": True})
+        server.stop_session(a["id"])
+        b = server.start_session({"name": "Auftrag B", "confirmed": True})
+        self.open()
+        self.tab("5 Prüfen & Messung")
+        frame, state, prn = self.page.locator("#report-frame"), self.page.locator("#report-state-msg"), self.page.locator("#report-print")
+        held = []
+        # AC16-01: A open, close, then B with a delayed answer
+        self.page.evaluate("([id]) => { openReport(id, 'Auftrag A'); }", [a["id"]])
+        expect(self.page.frame_locator("#report-frame").locator("body")).to_contain_text("Auftrag A")
+        self.page.route("**/report", lambda route, *_: held.append(route))
+        # close and reopen in the same tick: the about:blank load of the reset arrives while B is loading
+        self.page.evaluate("([id]) => { closeReport(); openReport(id, 'Auftrag B'); }", [b["id"]])
+        self.page.wait_for_timeout(400)                                      # removed srcdoc fired its load meanwhile
+        expect(state).to_contain_text("Bericht wird geladen")
+        expect(frame).to_be_hidden()
+        expect(prn).to_be_disabled()
+        self.assertEqual(len(held), 1)
+        held.pop().continue_()
+        expect(self.page.frame_locator("#report-frame").locator("body")).to_contain_text("Auftrag B")
+        expect(self.page.frame_locator("#report-frame").locator("body")).not_to_contain_text("Auftrag A")
+        expect(prn).to_be_enabled()
+        # AC16-02: close while loading -> late answer must not reopen or enable print
+        self.page.click("#report-back")
+        self.page.evaluate("([id]) => { openReport(id, 'Auftrag A'); }", [a["id"]])
+        self.page.wait_for_timeout(200)
+        self.page.click("#report-back")
+        for route in held:
+            try:
+                route.continue_()
+            except Exception:                                                # aborted by AbortController
+                pass
+        self.page.wait_for_timeout(500)
+        expect(self.page.locator("#report-viewer")).to_be_hidden()
+        expect(prn).to_be_disabled()
+        expect(frame).to_be_hidden()
+        self.page.unroute("**/report")
+        # AC16-03: HTTP 200 but the body breaks off
+        self.page.evaluate("""() => { const f = window.fetch; window.fetch = (u, o) => String(u).endsWith('/report')
+            ? Promise.resolve({ok: true, status: 200, text: () => Promise.reject(new TypeError('body'))}) : f(u, o); }""")
+        self.page.evaluate("([id]) => { openReport(id, 'Auftrag A'); }", [a["id"]])
+        expect(state).to_contain_text("Bericht wurde unvollständig übertragen")
+        expect(prn).to_be_disabled()
+        # P2: focus returns to the button that opened the viewer
+        self.page.reload()
+        self.tab("5 Prüfen & Messung")
+        btn = self.page.locator("#session-history .job-report").first
+        btn.focus()
+        self.page.keyboard.press("Enter")
+        expect(self.page.frame_locator("#report-frame").locator("body")).to_contain_text("Auftrag A")
+        self.page.keyboard.press("Escape")
+        self.assertTrue(btn.evaluate("e => e === document.activeElement"))
 
 
 class MobileTests(V2Browser):
