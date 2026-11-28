@@ -255,7 +255,12 @@ unter Umständen Warmwasser-, Abtau- und Nicht-Heizphasen. Daraus ist keine Eins
         early = "Messung vor Ablauf der geplanten Dauer beendet – Ergebnis vorläufig."
         reasons = [early if (r == "Messung läuft noch – Ergebnis vorläufig." and not running) else r for r in result["reasons"]]
         parts.append("<ul>" + "".join(f"<li>{e(r)}</li>" for r in reasons) + "</ul>")
-    parts.append('<p class="hint">Alle Schwellen sind Pilotwerte (Regelwerk AB-014), noch im Feld zu bestätigen.</p>')
+    parts.append('<p class="hint">Alle Schwellen sind Pilotwerte (' + e(result.get("rule_version") or "Regelwerk AB-014")
+                 + "), noch im Feld zu bestätigen. Eine Nacht zählt mit mindestens 4 h ungestörten, gültigen Messwerten "
+                 "zwischen 22 und 6 Uhr in Abschnitten von mindestens 30 min (bei mehreren Abschnitten mindestens zwei "
+                 "von 60 min). Abtauung: aktive Phase plus 30 min, wenn der Vorlauf wieder erholt ist, sonst 60 min; "
+                 "Warmwasser: aktive Phase plus 60 min.</p>" if result.get("rule_version") else
+                 '<p class="hint">Alle Schwellen sind Pilotwerte (Regelwerk AB-014), noch im Feld zu bestätigen.</p>')
 
     emitters = cfg.get("emitters") or []
     room_names = {r.get("id"): r.get("name") for r in cfg.get("rooms") or []}
@@ -302,10 +307,21 @@ unter Umständen Warmwasser-, Abtau- und Nicht-Heizphasen. Daraus ist keine Eins
     if band.get("raw_minus_damped_median_k") is not None:
         parts.append(f"<p class=\"hint\">Ungedämpfte minus gedämpfte Außentemperatur (Median): "
                      f"{_n(band['raw_minus_damped_median_k'], 1, 'K')}.</p>")
-    parts.append(_table(["Nacht", "Technisch auswertbar", "Heizbetrieb bestätigt", "Verwertbar", "Außen (Median)", "Fehlende Slots", "Störungen"],
+    def counted(n):
+        if "counted_hours" not in n:                    # results before AB-034
+            return _n(n["ok_hours"], 1, "h")
+        blocks = sum(1 for b in n.get("blocks", []) if b.get("counted"))
+        return (f"{_n(n['counted_hours'], 1, 'h')} in {blocks} Abschnitt{'en' if blocks != 1 else ''}" if n["valid"]
+                else f"keine geeigneten Abschnitte ({_n(n['ok_hours'], 1, 'h')} gültig)")
+    def defrost(n):
+        if "defrost_events" not in n:
+            return "–"
+        k, bad = n["defrost_events"], n.get("defrost_unrecovered", 0)
+        return "keine" if not k else f"{k}" + (f", davon {bad} nicht stationär nach Abtauung" if bad else ", Vorlauf jeweils erholt")
+    parts.append(_table(["Nacht", "Technisch auswertbar", "Heizbetrieb bestätigt", "Gezählt", "Abtauungen", "Außen (Median)", "Fehlende Slots", "Störungen"],
                         [[_t(n["date"] + "T12:00:00+00:00", tz, False), "ja" if n["valid"] else "nein",
                           ("–" if not n["valid"] or "heating_verified" not in n else "ja" if n["heating_verified"] else "nicht nachgewiesen"),
-                          _n(n["ok_hours"], 1, "h"),
+                          counted(n), defrost(n),
                           _n(n["outdoor_median"], 1, "°C"), _pct(n["missing_share"]),
                           e(", ".join(DIST_TEXT.get(d, d) for d in n["disturbances"]) or "–")] for n in result["nights"]]))
 

@@ -129,8 +129,15 @@ class AssessmentTests(unittest.TestCase):
             p.set("sensor.act", local(day, h), local(day, h, 10), s="defrost")
         r = p.run()
         night = next(n for n in r["nights"] if n["date"] == "2026-12-01")
-        self.assertFalse(night["valid"])
+        # AB-034: four 10-min defrosts with recovered flow leave four ~70-min blocks -> night counts
+        self.assertTrue(night["valid"])
         self.assertIn("defrost", night["disturbances"])
+        self.assertEqual((night["defrost_events"], night["defrost_unrecovered"]), (4, 0))
+        hourly = Plant(days=2)                          # defrost every hour: only ~20-min islands remain
+        for i in range(8):
+            t = local(1, 22) + timedelta(hours=i)
+            hourly.set("sensor.act", t, t + timedelta(minutes=10), s="defrost")
+        self.assertFalse(next(n for n in hourly.run()["nights"] if n["date"] == "2026-12-01")["valid"])
         p2 = Plant(days=2)
         p2.set("binary_sensor.ww", local(1, 23), local(2, 1), s="on")
         n2 = next(n for n in p2.run()["nights"] if n["date"] == "2026-12-01")
