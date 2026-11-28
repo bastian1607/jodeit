@@ -87,6 +87,15 @@ Regeln (Review ChatGPT 12):
   einer Wiederherstellung vor der nächsten Kundenmessung bereinigen und prüfen. HA-Sicherungen auf dem Messkoffer
   dokumentiert der Techniker und ersetzt/löscht sie bei Fälligkeit gezielt (Betriebsanweisung in Outline).
 
+## Änderungen in v0.6.2 (freigegeben 28.11.2026)
+
+- AB-030 Teil 2: Ergebnisbericht im Layout v2. Seite 1 ist ein vollständiges A4-Kundenblatt mit Jodeit-Logo,
+  Eingriffsnachweis „Nur gemessen, nicht gesteuert“, Datenqualität, Ergebnis, beobachteten Vorlauf-Soll-
+  Messpunkten (keine berechnete Heizkurve), Vergleichswert bei 0 °C (nicht bestimmbar), bis zu drei Räumen und
+  Technikerabnahme. Der technische Anhang beginnt auf Seite 2. Keine berechneten Empfehlungen (AB-031 gesperrt).
+- In der Home-Assistant-App ist der Drucken-Knopf ausgeblendet; Hinweis, im Browser zu drucken.
+- Festgeschriebene Berichte älterer Messungen bleiben unverändert.
+
 ## Änderungen in v0.6.1 (freigegeben 28.11.2026)
 
 - AB-030 Teil 1: „Messbericht ansehen“ öffnet den Bericht in einem internen Vollbild-Viewer derselben
