@@ -151,9 +151,11 @@ class LayoutV2Tests(ReportTests):
         self.assertIn("Was hat AutoBalance tatsächlich verändert?", html)
         self.assertIn("Nur gemessen, nicht gesteuert", html)
         self.assertIn("AutoBalance hat die Wärmepumpe nicht verändert.", html)
-        self.assertIn("Noch nicht berechenbar", html)
-        self.assertIn("Nicht dokumentiert", html)
-        for forbidden in ("AutoBalance hat eingestellt", "optimiert", "Voreinstellung: ", "l/h empfohlen"):
+        self.assertIn("In dieser Version noch keine berechnete Einstellungsempfehlung", html)
+        self.assertIn("Keine Änderung durch AutoBalance; eine manuelle Umsetzung wurde nicht dokumentiert", html)
+        self.assertIn("Konkrete Einstellvorgaben werden derzeit nicht automatisch", html)
+        for forbidden in ("AutoBalance hat eingestellt", "optimiert", "Voreinstellung: ", "l/h empfohlen",
+                          "vorgeschlagene", "Noch nicht ableitbar"):
             self.assertNotIn(forbidden, html)
 
     def test_ac11_stage5_not_claimed(self):
@@ -173,15 +175,65 @@ class LayoutV2Tests(ReportTests):
         self.assertEqual(len(rows), 2)                                              # one row per radiator
         for row in rows:
             self.assertIn("Nicht belastbar berechenbar", row)
+            self.assertIn("AB-031-Berechnung noch nicht freigegeben", row)
+            self.assertIn("erforderliche Anlagendaten fehlen", row)
             self.assertIn(">fehlt<", row)                                           # no heat load, no output
 
     def test_ac14_15_curve_only_measured_points_and_no_zero_degree_value(self):
         html, _ = self.html()
-        self.assertIn("Vorlauf-Soll bei 0 °C gedämpfter Außentemperatur", html)
+        self.assertIn("Vorlauf-Soll bei 0 °C <b>gedämpfter</b> Außentemperatur (Jodeit-Kennwert)", html)
         self.assertIn("Nicht zuverlässig bestimmbar", html)
-        self.assertIn("Noch nicht ableitbar", html)
+        self.assertIn("Regler liefert keinen bestätigten Vergleichswert", html)
+        self.assertIn("Noch keine fachlich freigegebene Empfehlung", html)
         self.assertNotIn("<path", html)                                             # no drawn/fitted curve
-        self.assertIn("Keine berechnete oder geglättete Kurve", html)
+        self.assertIn(report.CURVE_TITLE, html)
+        self.assertIn("Ungefilterte, technisch gültige 5-Minuten-Messpaare", html)
+        self.assertIn("Warmwasser-, Abtau- und Nicht-Heizphasen", html)
+        self.assertIn("Daraus ist keine Einstellungsempfehlung ableitbar", html)
+
+    def test_ac14_undamped_fallback_never_presented_as_damped_kpi(self):
+        pts = [(-3.0, 45.0), (0.2, 42.0), (4.0, 39.0)]
+        meta = {"n": 3, "from": "2026-12-01T03:00:00+00:00", "to": "2026-12-03T03:00:00+00:00",
+                "target": "sensor.vl_soll", "outdoor": "sensor.out"}
+        with patch.object(server, "curve_points", return_value=(pts, False, meta)):
+            html, _ = self.html()
+        self.assertIn("Außentemperatur ungedämpft in °C", html)
+        self.assertIn("Diagramm nutzt ungedämpfte Außentemperatur; für den gedämpften 0-°C-Kennwert liegen noch keine "
+                      "geeigneten Werte vor.", html)
+        self.assertIn("3 Messpaare", html)
+        k0 = html[html.index('id="report-k0"'):]
+        k0 = k0[:k0.index("</div></div>")]
+        for value in ("42", "42,0", "45", "39"):                                   # no measured value turned into a KPI
+            self.assertNotIn(f">{value}", k0)
+        self.assertIn(report.NOT_DETERMINABLE, k0)
+
+    def test_ac14_damped_points_with_dhw_still_labelled_unfiltered(self):
+        meta = {"n": 4000, "from": None, "to": None, "target": "sensor.vl_soll", "outdoor": "sensor.dampedout"}
+        pts = [(x / 100, 40.0) for x in range(-500, 500, 5)]
+        with patch.object(server, "curve_points", return_value=(pts, True, meta)):
+            html, _ = self.html()
+        self.assertIn("4000 Messpaare, davon 200 dargestellt", html)
+        self.assertIn("Warmwasser-, Abtau- und Nicht-Heizphasen", html)
+        self.assertNotIn("Diagramm nutzt ungedämpfte", html)
+        self.assertNotIn("<path", html)
+
+    def test_p1_customer_page_shows_at_most_three_rooms(self):
+        def add(cfg):
+            base = next(r for r in cfg["rooms"] if r["name"] == "Bad")
+            for i in range(4):
+                cfg["rooms"].append(dict(base, id=f"room_extra{i}", name=f"Zusatzraum {i}"))
+        html, _ = self.html(change=add)
+        page1 = html[html.index('id="report-page1"'):html.index('id="report-appendix"')]
+        rooms = page1[page1.index('id="report-rooms"'):]
+        rooms = rooms[:rooms.index("</table>")]
+        self.assertEqual(rooms.count("<tr>") - 1, 3)
+        self.assertIn("3 weitere Räume und alle Heizkörper im Anhang", page1)
+        self.assertIn('id="report-signoff"', page1)                                 # sign-off belongs to page 1
+
+    def test_stopped_early_job_is_not_called_running(self):
+        html, _ = self.html(days=5)                                               # planned 7 days, stopped after 5
+        self.assertNotIn("Messung läuft noch", html)
+        self.assertIn("Messung vor Ablauf der geplanten Dauer beendet – Ergebnis vorläufig.", html)
 
     def test_ac16_running_report_is_marked_provisional(self):
         html, _ = self.html(days=2, stop=False)
@@ -229,9 +281,12 @@ class CurvePointTests(unittest.TestCase):
         self.put("ma_a", "2026-12-06T03:00:00+00:00", "sensor.thermostat_hc1_targetflowtemp", 0, valid=0)
         self.put("ma_b", "2026-12-01T03:00:00+00:00", "sensor.thermostat_dampedoutdoortemp", -9.0)       # other job
         self.put("ma_b", "2026-12-01T03:00:00+00:00", "sensor.thermostat_hc1_targetflowtemp", 52.0)
-        points, damped = server.curve_points("ma_a", self.cfg)
+        points, damped, meta = server.curve_points("ma_a", self.cfg)
         self.assertTrue(damped)
         self.assertEqual(points, [(-2.0, 46.0), (0.0, 44.0), (3.5, 41.0)])
+        self.assertEqual((meta["n"], meta["from"], meta["to"]),
+                         (3, "2026-12-01T03:00:00+00:00", "2026-12-03T03:00:00+00:00"))
+        self.assertEqual(meta["outdoor"], "sensor.thermostat_dampedoutdoortemp")
         svg = report._curve_svg(points, damped)
         self.assertEqual(svg.count("<circle"), 3)
         self.assertIn("0 °C", svg)

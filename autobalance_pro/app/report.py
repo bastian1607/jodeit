@@ -40,7 +40,7 @@ def _table(headers, rows):
 
 
 CSS = """
-@page{size:A4 portrait;margin:14mm 13mm 16mm}
+@page{size:A4 portrait;margin:12mm 12mm 13mm}
 *{box-sizing:border-box}
 body{font:13.5px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1b2a33;max-width:860px;margin:20px auto;padding:0 14px;background:#fff}
 h1{font-size:20px;margin:0;color:#183c4a}h2{font-size:15px;margin:20px 0 8px;color:#183c4a;border-bottom:1.5px solid #183c4a;padding-bottom:3px;text-transform:uppercase;letter-spacing:.03em}
@@ -50,9 +50,11 @@ th{background:#eef2f4;font-weight:600}thead{display:table-header-group}tr{break-
 .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:3px solid #183c4a;padding-bottom:10px}
 .head img{height:46px;width:auto}.head .t{text-align:right}.head .sub{color:#4b5d68;font-size:13px}
 .meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:12.5px;color:#33454f;margin:8px 0 0}
+.clip{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.meta .clip{max-width:46ch}.nw{white-space:nowrap}td .clip{max-width:22ch}
 .state{display:inline-block;border:1.5px solid currentColor;border-radius:4px;padding:1px 7px;font-weight:700;font-size:12px}
 .box{border:1.5px solid #183c4a;border-radius:6px;padding:10px 12px;margin:12px 0}
-.box h2{border:0;margin:0 0 6px;padding:0}
+.box h2{border:0;margin:0 0 6px;padding:0}.box p{margin:5px 0}
 .big{font-size:16px;font-weight:700;margin:2px 0}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;margin:4px 0}
 .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
@@ -61,15 +63,26 @@ th{background:#eef2f4;font-weight:600}thead{display:table-header-group}tr{break-
 .bad{background:#fde4e4;color:#7d1717}.warn{background:#fff2da;color:#5e4100}.good{background:#e1f4e9;color:#124d33}
 .nd{color:#5e4100;font-weight:600}
 .hint{color:#4b5d68;font-size:12px}ul{margin:5px 0 5px 18px;padding:0}
-.sign{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}.sign div{border-top:1px solid #1b2a33;padding-top:3px;font-size:11.5px;color:#4b5d68}
+.curve{display:grid;grid-template-columns:1fr 230px;gap:12px;align-items:start}
+.plot svg{width:100%;height:auto;display:block}
+.k0{border:1px solid #c9d3d9;border-radius:6px;padding:7px 9px;font-size:12.5px}
+.k0h{font-weight:600;margin-bottom:4px}.k0r{border-top:1px solid #e3e8eb;padding:4px 0}
+.k0r span{display:block;color:#4b5d68;font-size:11.5px}.k0r b{display:block}.k0r small{display:block;color:#4b5d68}
+.sign{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}.sign div{border-top:1px solid #1b2a33;padding-top:3px;font-size:11.5px;color:#4b5d68}
 .appendix{break-before:page;page-break-before:always}
 .appendix>h1{font-size:17px;border-bottom:3px solid #183c4a;padding-bottom:6px}
 svg text{font:11px system-ui,sans-serif;fill:#33454f}
-@media (max-width:620px){.tiles{grid-template-columns:repeat(2,1fr)}.head{display:block}.head .t{text-align:left}table{font-size:12px}}
-@media print{h2,h3{break-after:avoid;page-break-after:avoid}body{margin:0;max-width:none;padding:0;font-size:11px;line-height:1.35}.noprint{display:none}.box,.tiles,.chart{break-inside:avoid}
-h2{font-size:13px;margin:12px 0 5px}.box{padding:7px 10px;margin:8px 0}.tiles{margin:7px 0}.result{margin:6px 0;padding:6px 10px}
-.head img{height:38px}h1{font-size:17px}th,td{padding:3px 5px}.sign{margin-top:16px}svg.chart{max-height:170px}
-.bad,.warn,.good{background:none}}
+@media (max-width:620px){.tiles{grid-template-columns:repeat(2,1fr)}.head{display:block}.head .t{text-align:left}table{font-size:12px}.curve{grid-template-columns:1fr}}
+@media print{body{margin:0;max-width:none;padding:0;font-size:12px;line-height:1.3}.noprint{display:none}
+h2,h3{break-after:avoid;page-break-after:avoid}.box,.tiles,.curve,.page1 table{break-inside:avoid}
+.bad,.warn,.good{background:none}
+.page1 h2{font-size:12.5px;margin:9px 0 4px}.page1 .box{padding:6px 10px;margin:7px 0}
+.head img{height:36px}h1{font-size:16px}.head .sub{font-size:12px}.head{padding-bottom:6px}.meta{font-size:11.5px;margin-top:5px}
+.page1 .hint{font-size:11px;margin:4px 0}.big{font-size:14px}
+.tiles{gap:6px;margin:6px 0}.tile{padding:4px 7px}.tile b{font-size:13px}.tile span{font-size:10.5px;line-height:1.2;display:block}
+.result{margin:5px 0;padding:5px 9px}th,td{padding:2.5px 5px}
+.curve{grid-template-columns:1fr 205px;gap:10px}.plot svg{height:128px;width:100%}.k0{font-size:11.5px;padding:5px 8px}.k0r{padding:2px 0}
+.sign{margin-top:20px}}
 """
 
 STAGE_SHORT = {"no_data": "Messung nicht ausreichend", "insufficient": "Messung nicht ausreichend",
@@ -96,15 +109,16 @@ def next_step(result, running):
 def _curve_svg(points, damped):
     """Measured (outdoor, flow target) pairs as dots - no fitted or modelled curve (AC-030-14/15)."""
     if not points:
-        return ('<p class="nd">Keine gemeinsamen Messwerte von Vorlauf-Soll und Außentemperatur in diesem Messauftrag.</p>')
+        return ('<p class="nd" id="report-curve-empty">Keine gemeinsamen Messwerte von Vorlauf-Soll und Außentemperatur in diesem Messauftrag.</p>')
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
     x0, x1 = min(-15.0, min(xs) - 1), max(15.0, max(xs) + 1)
     y0, y1 = min(20.0, min(ys) - 2), max(55.0, max(ys) + 2)
-    W, H, L, B, T, R = 640, 250, 44, 34, 10, 12
+    W, H, L, B, T, R = 640, 168, 40, 30, 8, 10
     sx = lambda x: L + (x - x0) / (x1 - x0) * (W - L - R)
     sy = lambda y: T + (y1 - y) / (y1 - y0) * (H - T - B)
-    parts = [f'<svg class="chart" viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Gemessene Vorlauf-Sollwerte über Außentemperatur">',
+    parts = [f'<svg class="chart" viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" role="img" '
+             f'aria-label="Beobachtete Vorlauf-Soll-Messpunkte über Außentemperatur, keine berechnete Heizkurve">',
              f'<rect x="{L}" y="{T}" width="{W-L-R}" height="{H-T-B}" fill="none" stroke="#9aa9b2"/>']
     step = 5
     for gx in range(int(x0 // step * step), int(x1) + 1, step):
@@ -119,23 +133,30 @@ def _curve_svg(points, damped):
                  f'<text x="{sx(0)+4:.1f}" y="{T+12}">0 °C</text>')
     for x, y in points:
         parts.append(f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="2.2" fill="#126e66" fill-opacity=".55"/>')
-    parts.append(f'<text x="{(W+L)/2:.0f}" y="{H-4}" text-anchor="middle">Außentemperatur {"gedämpft" if damped else "ungedämpft"} in °C</text>'
+    parts.append(f'<text x="{(W+L)/2:.0f}" y="{H-3}" text-anchor="middle">Außentemperatur {"gedämpft" if damped else "ungedämpft"} in °C</text>'
                  f'<text x="12" y="{(H-B)/2:.0f}" transform="rotate(-90 12 {(H-B)/2:.0f})" text-anchor="middle">Vorlauf-Soll °C</text></svg>')
     return "".join(parts)
 
 
+NO_CALC = "In dieser Version noch keine berechnete Einstellungsempfehlung"
+NO_CHANGE = "Keine Änderung durch AutoBalance; eine manuelle Umsetzung wurde nicht dokumentiert"
+CURVE_TITLE = "Beobachtete Vorlauf-Soll-Messpunkte (keine berechnete oder fachlich geprüfte Heizkurve)"
+
+
 def render(session, result, gaps, events, params, labels, tz, tz_name, version, now, frozen_at=None, *,
-           cfg=None, curve_points=None, curve_damped=True, logo_uri=None):
-    """Return the complete HTML document (AB-030 layout v2: customer page 1 + technician appendix).
+           cfg=None, curve_points=None, curve_damped=True, curve_meta=None, logo_uri=None):
+    """Return the complete HTML document (AB-030 layout v2: one A4 customer page + technician appendix).
 
     session: stored measuring job. result: assessment.assess(...) incl. "texts".
     gaps: AB-020 gaps (> 15 min) inside the job window. events: app starts/stops in the window.
     params: [(label, value, unit)] parameter state at the end of the window. labels: {entity_id: text}.
-    cfg: configuration of the job (rooms, emitters, heat source). curve_points: measured (outdoor, flow target).
-    Nothing here calculates a recommendation (AB-031 not released): such fields read "Noch nicht berechenbar".
+    cfg: configuration of the job (rooms, emitters, heat source).
+    curve_points: measured (outdoor, flow target) pairs, unfiltered; curve_meta: {n, from, to, target, outdoor}.
+    Nothing here calculates a recommendation (AB-031 not released).
     """
     e = escape
     cfg = cfg or {}
+    meta = curve_meta or {}
     w = result["window"]
     running = not session.get("ended_at")
     stage = result["stage"]
@@ -152,42 +173,53 @@ def render(session, result, gaps, events, params, labels, tz, tz_name, version, 
     parts = [f"""<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ergebnisbericht {e(session['name'])}</title><style>{CSS}</style></head><body>
 <p class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></p>
+<section class="page1" id="report-page1">
 <div class="head" id="report-head">{logo}<div class="t"><h1>AutoBalance Pro · Ergebnisbericht Heizungsoptimierung</h1>
 <div class="sub">Heizkurvenprüfung und Heizkörperempfehlungen</div></div></div>
-<div class="meta"><span><b>Auftrag:</b> {e(session['name'])}</span><span><b>ID:</b> {e(session.get('id', '–'))}</span>
-<span><b>Heizkreis:</b> {e(circuit_text)}</span>
+<div class="meta"><span class="clip"><b>Auftrag:</b> {e(session['name'])}</span><span><b>ID:</b> {e(session.get('id', '–'))}</span>
+<span class="clip"><b>Heizkreis:</b> {e(circuit_text)}</span>
 <span><b>Zeitraum:</b> {e(_t(session['started_at'], tz))} – {e(_t(session['ended_at'], tz) if session.get('ended_at') else 'läuft')}</span>
 <span><b>Erstellt:</b> {e(_t(frozen_at or now, tz))}</span><span class="state" id="report-status">{e(status)}</span></div>
-<p class="hint" id="report-state">{e("Bericht bei Messende erstellt und unverändert gespeichert. Enthält nur Daten dieser Messung." if frozen_at else "Vorläufiger Bericht einer laufenden Messung. Er wird beim Stoppen mit dem Endstand festgeschrieben.")}</p>
+<p class="hint" id="report-state">{e("Bei Messende erstellt und unverändert gespeichert. Enthält nur Daten dieser Messung." if frozen_at else "Vorläufiger Bericht einer laufenden Messung; wird beim Stoppen festgeschrieben.")}</p>
 
 <div class="box" id="report-intervention"><h2>Was hat AutoBalance tatsächlich verändert?</h2>
 <p class="big">Nur gemessen, nicht gesteuert</p>
-<div class="kv"><span>Empfehlungen:</span><b>{NOT_YET}</b><span>Umsetzung:</span><b>Nicht dokumentiert</b></div>
-<p><b>AutoBalance hat die Wärmepumpe nicht verändert.</b> Die nachfolgenden Ergebnisse beruhen auf Messwerten; vorgeschlagene
-Änderungen müssen durch eine Fachkraft geprüft und bei Bedarf separat umgesetzt werden.</p></div>
+<div class="kv"><span>Empfehlungen:</span><b>{NO_CALC}</b><span>Umsetzung:</span><b>{NO_CHANGE}</b></div>
+<p><b>AutoBalance hat die Wärmepumpe nicht verändert.</b> Konkrete Einstellvorgaben werden derzeit nicht automatisch
+berechnet; mögliche Maßnahmen müssen durch eine Fachkraft beurteilt werden.</p></div>
 
 <div class="tiles" id="report-quality">
-<div class="tile"><b>{_n(w['hours'] / 24, 1)} Tage</b><span>Messdauer (geplant {w['planned_days']} Tage)</span></div>
-<div class="tile"><b>{result['valid_nights']} von {technical}</b><span>Nächte mit bestätigtem Heizbetrieb / technisch auswertbar</span></div>
+<div class="tile"><b>{_n(w['hours'] / 24, 1)} Tage</b><span>Messdauer (geplant {w['planned_days']})</span></div>
+<div class="tile"><b>{result['valid_nights']} von {technical}</b><span>Nächte Heizbetrieb bestätigt / technisch auswertbar</span></div>
 <div class="tile"><b>{len(monitored)} von {len(rooms)}</b><span>Räume überwacht</span></div>
 <div class="tile"><b>{(_n(band['min'], 1) + ' … ' + _n(band['max'], 1, '°C')) if band['min'] is not None else 'nicht erfasst'}</b>
-<span>Außentemperatur {'gedämpft' if band['damped'] else 'ungedämpft'}, geeignete Nächte</span></div></div>
+<span>Außentemp. {'gedämpft' if band['damped'] else 'ungedämpft'}, geeignete Nächte</span></div></div>
 
 <div class="result {'warn' if result.get('restricted') else STAGE_CLASS[stage]}" id="report-result">{e((result['restricted_label'] + ': ') if result.get('restricted') else '')}{e(result['stage_text'])}</div>"""]
     if result.get("disturbance_notice"):
         parts.append(f'<p class="nd" id="report-disturbance">{e(result["disturbance_notice"])}</p>')
 
-    parts.append(f"""<h2>Heizkurve und Vergleich bei 0 °C Außentemperatur</h2>
-{_curve_svg(curve_points or [], curve_damped)}
-<p class="hint">Punkte: im Messauftrag gemessene Vorlauf-Sollwerte des Reglers (5-Minuten-Werte) über der
-{'gedämpften' if curve_damped else 'ungedämpften'} Außentemperatur. Keine berechnete oder geglättete Kurve.</p>
-{_table(["Vorlauf-Soll bei 0 °C gedämpfter Außentemperatur", "Wert", "Grundlage"], [
-        ["Aktuell", f'<span class="nd">{NOT_DETERMINABLE}</span>',
-         "Der Regler liefert keinen Kurvenwert bei 0 °C; die Herstellerkurve ist nicht als Modell hinterlegt."],
-        ["Empfohlen", f'<span class="nd">Noch nicht ableitbar</span>', "Keine freigegebene Empfehlungslogik (AB-031)."],
-        ["Tatsächlich umgesetzt", f'<span class="nd">Nicht dokumentiert</span>', "Keine Änderung am Regler erfasst."]])}""")
+    pts = curve_points or []
+    src_line = ""
+    if pts:
+        rng = (f", {_t(meta['from'], tz)} – {_t(meta['to'], tz)}" if meta.get("from") and meta.get("to") else "")
+        n = meta.get("n", len(pts))
+        shown = "" if n == len(pts) else f", davon {len(pts)} dargestellt"
+        src_line = (f"{n} Messpaare{shown}{rng}. Quelle: "
+                    f"{e(labels.get(meta.get('target'), meta.get('target') or 'Vorlauf-Soll'))} über "
+                    f"{e(labels.get(meta.get('outdoor'), meta.get('outdoor') or 'Außentemperatur'))} "
+                    f"({'gedämpft' if curve_damped else 'ungedämpft'}). ")
+    parts.append(f"""<h2 id="report-curve-title">{CURVE_TITLE}</h2>
+<div class="curve"><div class="plot">{_curve_svg(pts, curve_damped)}</div>
+<div class="k0" id="report-k0"><div class="k0h">Vorlauf-Soll bei 0 °C <b>gedämpfter</b> Außentemperatur (Jodeit-Kennwert)</div>
+<div class="k0r"><span>Aktuell</span><b class="nd">{NOT_DETERMINABLE}</b><small>Regler liefert keinen bestätigten Vergleichswert</small></div>
+<div class="k0r"><span>Empfohlen</span><b class="nd">Noch keine fachlich freigegebene Empfehlung</b></div>
+<div class="k0r"><span>Umgesetzt</span><b class="nd">Keine Änderung durch AutoBalance</b></div></div></div>
+<p class="hint" id="report-curve-note">{src_line}Ungefilterte, technisch gültige 5-Minuten-Messpaare, ohne Linie oder Glättung; enthalten
+unter Umständen Warmwasser-, Abtau- und Nicht-Heizphasen. Daraus ist keine Einstellungsempfehlung ableitbar.{
+    "" if curve_damped else " <b>Diagramm nutzt ungedämpfte Außentemperatur; für den gedämpften 0-°C-Kennwert liegen noch keine geeigneten Werte vor.</b>"}</p>""")
 
-    ranked = sorted(rooms, key=lambda r: (not r["monitored"], -abs(r["deviation_median_k"] or 0)))[:5]
+    ranked = sorted(rooms, key=lambda r: (not r["monitored"], -abs(r["deviation_median_k"] or 0)))[:3]
     def observation(r):
         if not r["monitored"]:
             return "nicht überwacht"
@@ -196,19 +228,20 @@ def render(session, result, gaps, events, params, labels, tz, tz_name, version, 
             return "keine Daten in geeigneten Nächten"
         txt = f"im Median {_n(abs(d), 1, 'K')} {'über' if d > 0 else 'unter' if d < 0 else 'auf'} Soll"
         return txt + ("" if r["stationary"] is not False else ", nicht stationär")
-    parts.append("<h2>Empfehlungen für die Räume</h2>")
-    parts.append(_table(["Raum", "Soll", "Beobachtung (geeignete Nächte)", "Empfehlung"],
-                        [[e(r["name"]), _n(r["target"], 1, "°C"), e(observation(r)),
-                          f'<span class="nd">{NOT_YET}</span> · Prüfung erforderlich'] for r in ranked]))
-    parts.append('<p class="hint">Vollständige Raum- und Heizkörperliste im Anhang. Eine Raumabweichung allein bestimmt '
-                 "keine Ventilvoreinstellung.</p>")
+    parts.append('<h2>Wichtigste Räume</h2>')
+    parts.append('<div id="report-rooms">' + ('<p class="nd">Keine Räume im Messauftrag konfiguriert.</p>' if not ranked else _table(["Raum", "Soll", "Beobachtung (geeignete Nächte)", "Empfehlung"],
+                        [[f'<span class="clip">{e(r["name"])}</span>', '<span class="nw">' + _n(r["target"], 1, "°C") + "</span>", e(observation(r)),
+                          f'<span class="nd">{NO_CALC}</span>'] for r in ranked])) + "</div>")
+    more = len(rooms) - len(ranked)
+    parts.append(f'<p class="hint">{f"{more} weitere Räume und alle" if more > 0 else "Alle"} Heizkörper im Anhang. Eine Raumabweichung '
+                 "allein bestimmt keine Ventilvoreinstellung.</p>")
 
     parts.append(f"""<div class="box" id="report-signoff"><h2>Nächster Schritt und Technikerabnahme</h2>
 <p><b>Nächster Schritt:</b> {e(next_step(result, running))}</p>
-<p>Messbedingung „Thermostatköpfe auf Stufe 5“: <b>nicht bestätigt</b> (wird in dieser Version nicht erfasst).</p>
-<p><b>Technische Auswertung, noch nicht durch Techniker abgenommen.</b> Dieser Bericht ist weder eine neue
-Heizlastberechnung noch ein Nachweis eines hydraulischen Abgleichs.</p>
-<div class="sign"><div>Geprüft durch (Name)</div><div>Datum</div></div></div>""")
+<p>Messbedingung „Thermostatköpfe auf Stufe 5“: <b>nicht bestätigt</b> (in dieser Version nicht erfasst).
+<b>Technische Auswertung, noch nicht durch Techniker abgenommen.</b> Keine Heizlastberechnung und kein Nachweis eines hydraulischen Abgleichs.</p>
+<div class="sign"><div>Geprüft durch (Name)</div><div>Datum</div></div></div>
+</section>""")
 
     # ------------------------------------------------------------------ technician appendix
     parts.append('<section class="appendix" id="report-appendix"><h1>Anhang: Messwerte und Technik</h1>')
@@ -219,7 +252,9 @@ Heizlastberechnung noch ein Nachweis eines hydraulischen Abgleichs.</p>
     for text in assessment.report_text(result, lambda iso: _t(iso, tz)):
         parts.append(f"<p>{e(text)}</p>")
     if result["reasons"]:
-        parts.append("<ul>" + "".join(f"<li>{e(r)}</li>" for r in result["reasons"]) + "</ul>")
+        early = "Messung vor Ablauf der geplanten Dauer beendet – Ergebnis vorläufig."
+        reasons = [early if (r == "Messung läuft noch – Ergebnis vorläufig." and not running) else r for r in result["reasons"]]
+        parts.append("<ul>" + "".join(f"<li>{e(r)}</li>" for r in reasons) + "</ul>")
     parts.append('<p class="hint">Alle Schwellen sind Pilotwerte (Regelwerk AB-014), noch im Feld zu bestätigen.</p>')
 
     emitters = cfg.get("emitters") or []
@@ -234,6 +269,11 @@ Heizlastberechnung noch ein Nachweis eines hydraulischen Abgleichs.</p>
         v = v or {}
         name = " ".join(x for x in (v.get("manufacturer"), v.get("series")) if x) or v.get("label") or "unbekannt"
         return name + (f", Einstellung {v['current_setting']}" if v.get("current_setting") else "")
+    def emitter_calc(x):
+        missing = ((room_load.get(x.get("room_id")) or {}).get("status") != "adopted"
+                   or not (x.get("rated_output") or {}).get("value_w") or not (x.get("valve") or {}).get("series"))
+        return ('<span class="nd">Nicht belastbar berechenbar</span> – AB-031-Berechnung noch nicht freigegeben'
+                + ("; erforderliche Anlagendaten fehlen" if missing else ""))
     parts.append("<h2>Heizkörper je Raum</h2>")
     parts.append(_table(["Raum", "Heizfläche", "Heizkreis", "Raumheizlast", "Leistung (Quelle)", "Ventil", "Empfohlene Voreinstellung"],
                         [[e(room_names.get(x.get("room_id"), "–")), e(x.get("name") or x.get("id", "–")),
@@ -241,10 +281,18 @@ Heizlastberechnung noch ein Nachweis eines hydraulischen Abgleichs.</p>
                           (_n((x.get("rated_output") or {}).get("value_w"), 0, "W") + " (" + e((x.get("rated_output") or {}).get("source") or "unbekannt") + ")")
                           if (x.get("rated_output") or {}).get("value_w") else "fehlt",
                           e(valve_text(x.get("valve"))),
-                          '<span class="nd">Nicht belastbar berechenbar</span> – Technikerprüfung erforderlich'] for x in emitters]))
+                          emitter_calc(x)] for x in emitters]))
     parts.append('<p class="hint">„Thermostatstellung 5“ ist eine Messbedingung, keine Ventilvoreinstellung. Eine motorische '
                  "Ventilöffnung in Prozent entspricht keinem Volumenstrom in l/h.</p>")
 
+    parts.append("<h2>Vorlauf-Soll bei 0 °C – Grundlagen</h2>")
+    parts.append(_table(["Kennwert", "Stand", "Grundlage"], [
+        ["Aktuell (gedämpft, 0 °C)", NOT_DETERMINABLE,
+         "Der Regler liefert keinen bestätigten Kurvenwert bei 0 °C; die Herstellerkurve ist nicht als Modell hinterlegt."],
+        ["Empfohlen", "Noch keine fachlich freigegebene Empfehlung", "AB-031-Berechnung noch nicht freigegeben."],
+        ["Umgesetzt", "Keine Änderung durch AutoBalance", "Eine manuelle Umsetzung wurde nicht dokumentiert."]]))
+    parts.append('<p class="hint">Die Messpunktgrafik auf Seite 1 zeigt ungefilterte technisch gültige Messpaare; Heizbetrieb, '
+                 "Warmwasser und Abtauung sind dort nicht herausgerechnet. Ungedämpfte Werte werden nie als gedämpfter Kennwert verwendet.</p>")
     parts.append("<h2>Außentemperatur und geeignete Nächte</h2>")
     parts.append(f"<p>Technisch auswertbare Nächte im aktuellen Auswertungsabschnitt: <b>{technical}</b> · "
                  f"davon Heizbetrieb bestätigt: <b>{result['valid_nights']}</b> · "

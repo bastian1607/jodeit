@@ -765,7 +765,7 @@ class AcceptanceTests(V2Browser):
         app.evaluate("([id]) => { openReport(id, 'Lahrmann Test'); }", [job["id"]])
         expect(app.frame_locator("#report-frame").locator("#report-intervention")).to_be_visible()
         expect(app.locator("#report-print")).to_be_hidden()
-        expect(app.locator("#report-print-hint")).to_contain_text("Bitte AutoBalance im Browser öffnen und dort drucken")
+        expect(app.locator("#report-print-hint")).to_contain_text("Drucken/PDF ist in dieser AutoBalance-Ansicht der Home-Assistant-App derzeit nicht verfügbar")
         app.close()
 
 
