@@ -72,6 +72,27 @@ def _state(cell):
     return str(cell.get("s", "")).strip().lower() if cell else ""
 
 
+def parameter_changes(ticks, values, params):
+    """AB-033: a parameter changes only if a valid value differs from its last valid value.
+
+    "unavailable"/"unknown" (e.g. a short EMS-ESP dropout) is a gap, not a change; the value after the gap is
+    compared with the last valid value before it."""
+    last, out = {}, []
+    for t in ticks:
+        row = values.get(t, {})
+        diff = []
+        for p in params:
+            s = _state(row.get(p))
+            if s in UNKNOWN_STATES:
+                continue
+            if p in last and last[p] != s:
+                diff.append(p)
+            last[p] = s
+        if diff:
+            out.append({"at": t, "kind": "parameter", "detail": diff})
+    return out
+
+
 def _intervals_after(times, minutes):
     """Disturbance from an observed tick until one poll later (state may last that long) + after-run."""
     return [(t, t + SLOT + timedelta(minutes=minutes)) for t in times]
@@ -135,7 +156,7 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
 
     # ---- events: DHW, defrost, parameter and target changes
     dhw_ticks, defrost_ticks, heating_off, changes = [], [], set(), []
-    previous_params = None
+    changes.extend(parameter_changes(ticks, values, roles.get("params", [])))
     for t in ticks:
         row = values.get(t, {})
         activity = _state(row.get(roles["hp_activity"])) if roles.get("hp_activity") else ""
@@ -145,12 +166,6 @@ def assess(start, end, ticks, values, history, roles, tz, planned_days=7, now=No
             defrost_ticks.append(t)
         if roles.get("heating_active") and _state(row.get(roles["heating_active"])) == "off":
             heating_off.add(t)
-        params = tuple(_state(row.get(p)) for p in roles.get("params", []))
-        if previous_params is not None and params != previous_params and all(params) and all(previous_params):
-            changes.append({"at": t, "kind": "parameter",
-                            "detail": [p for p, a, b in zip(roles.get("params", []), previous_params, params) if a != b]})
-        if all(params):
-            previous_params = params
     prev_targets = None
     for at, cfg in history:
         targets = {r["id"]: (r.get("name"), r.get("target")) for r in cfg.get("rooms", [])}

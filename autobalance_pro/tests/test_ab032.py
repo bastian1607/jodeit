@@ -123,3 +123,32 @@ class StorageAndJobTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ParameterGapTests(unittest.TestCase):
+    """AB-033: EMS-ESP dropouts are gaps, not parameter changes (found 28.11.2026: 10 false changes)."""
+
+    def run_states(self, seq):
+        import assessment
+        params = ["number.design", "select.mode"]
+        ticks = [NOW + timedelta(minutes=5 * i) for i in range(len(seq))]
+        values = {t: {p: {"s": s, "v": None, "ok": s not in ("unavailable", "unknown")} for p, s in zip(params, row)}
+                  for t, row in zip(ticks, seq)}
+        return ticks, assessment.parameter_changes(ticks, values, params)
+
+    def test_dropout_is_no_change(self):
+        _, changes = self.run_states([("54", "auto"), ("unavailable", "unavailable"), ("54", "auto"),
+                                      ("unknown", "auto"), ("54", "auto")])
+        self.assertEqual(changes, [])
+
+    def test_real_change_across_a_dropout_is_found(self):
+        ticks, changes = self.run_states([("54", "auto"), ("unavailable", "auto"), ("52", "auto")])
+        self.assertEqual(changes, [{"at": ticks[2], "kind": "parameter", "detail": ["number.design"]}])
+
+    def test_single_parameter_change(self):
+        ticks, changes = self.run_states([("54", "auto"), ("54", "eco")])
+        self.assertEqual(changes, [{"at": ticks[1], "kind": "parameter", "detail": ["select.mode"]}])
+
+    def test_first_values_after_start_dropout_are_no_change(self):
+        _, changes = self.run_states([("unavailable", "unavailable"), ("54", "auto"), ("54", "auto")])
+        self.assertEqual(changes, [])
