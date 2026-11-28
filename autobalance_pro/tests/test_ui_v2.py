@@ -742,6 +742,33 @@ class AcceptanceTests(V2Browser):
         self.assertTrue(btn.evaluate("e => e === document.activeElement"))
 
 
+    def test_ab030_v2_layout_in_viewer_and_ha_app_print_hint(self):
+        """AC-030-09/10/17 in the viewer; Bastian 28.11.: no print button inside the HA companion app."""
+        self.seed(rooms=("Wohnzimmer",))
+        job = server.start_session({"name": "Lahrmann Test", "confirmed": True})
+        self.open()
+        self.tab("5 Prüfen & Messung")
+        self.page.evaluate("([id]) => { openReport(id, 'Lahrmann Test'); }", [job["id"]])
+        rep = self.page.frame_locator("#report-frame")
+        expect(rep.locator("#report-head img")).to_be_visible()                     # embedded original logo
+        expect(rep.locator("#report-intervention")).to_contain_text("Nur gemessen, nicht gesteuert")
+        expect(rep.locator("#report-status")).to_contain_text("Laufende Messung")
+        expect(rep.locator("#report-appendix")).to_contain_text("Anhang: Messwerte und Technik")
+        expect(self.page.locator("#report-print")).to_be_visible()
+        expect(self.page.locator("#report-print-hint")).to_be_hidden()
+        self.shot("ab030-v2-bericht")
+        # same in the Home Assistant companion app
+        app = self.browser.new_page(viewport={"width": 390, "height": 844},
+                                    user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Home Assistant/2026.11 (io.robbie.HomeAssistant; build:1; iOS 18.0)")
+        app.goto(self.page.url)
+        app.locator(".tabs button", has_text="5 Prüfen & Messung").click()
+        app.evaluate("([id]) => { openReport(id, 'Lahrmann Test'); }", [job["id"]])
+        expect(app.frame_locator("#report-frame").locator("#report-intervention")).to_be_visible()
+        expect(app.locator("#report-print")).to_be_hidden()
+        expect(app.locator("#report-print-hint")).to_contain_text("Bitte AutoBalance im Browser öffnen und dort drucken")
+        app.close()
+
+
 class MobileTests(V2Browser):
     viewport = {"width": 390, "height": 844}
 
