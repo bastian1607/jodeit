@@ -1,2 +1,2 @@
 """Shared runtime version; keep in sync with the release manifest."""
-VERSION = "0.6.0"
+VERSION = "0.6.1"

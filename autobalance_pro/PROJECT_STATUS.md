@@ -6,6 +6,12 @@
 - Code: [bastian1607/jodeit – autobalance_pro](https://github.com/bastian1607/jodeit/tree/main/autobalance_pro), maßgeblich ist `main`.
 - Outline: [Pilotplanung](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-pilotplanung-nachtmessung-und-einkaufsvorschlag-9LHNVzzweD) · [Backlog](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-testfeedback-und-entwicklungsbacklog-jLA2PXPFLS) · [AB-008 Datenmodell v2](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-008-datenmodell-v2-entwurf-BUFcmJkMPt) · [AB-009 Oberfläche](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-ab-009-ubergabe-an-chatgpt-oberflache-fur-datenmodell-v2-wF0mbKy2cy) · [Zusammenarbeit](https://outline.bastianlahrmann.synology.me/doc/autobalance-pro-zusammenarbeit-chatgpt-codex-github-und-outline-Qbp3dKsZxM); Kurzregeln: [CLAUDE.md](CLAUDE.md).
 
+## Stand v0.6.1 (Release freigegeben von Bastian am 28.11.2026)
+
+- AB-030 Teil 1 (PR #26); Reviews ChatGPT 16–17.
+- Tests: 217 lokale Tests inkl. Chromium auf `main` `af8a7a1`. iPhone/HTTPS/Druck nach Installation.
+- Offen: AB-030 Teil 2 (Layout v2), AB-031 (gesperrt), AB-028.
+
 ## Stand v0.6.0 (Release freigegeben von Bastian am 27.11.2026)
 
 - AB-029 (PR #24); Reviews ChatGPT 12–15 in Outline.
